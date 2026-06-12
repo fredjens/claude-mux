@@ -1,0 +1,15 @@
+# mux runtime state (tasks, logs) created in the working repo
+.mux/
+
+# macOS
+.DS_Store
+
+# Editor / OS noise
+*.swp
+*~
+.idea/
+.vscode/
+
+# Logs & temp
+*.log
+*.tmp
