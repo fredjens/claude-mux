@@ -1,6 +1,6 @@
-<div align="center">
+<img src="docs/banner.svg" alt="Claude MUX — parallel planners feed a mux; you are the select signal, the loop is the clock, the output is a commit." width="100%">
 
-<img src="docs/logo.svg" alt="Claude MUX" width="440">
+<div align="center">
 
 **A multiplexer for [Claude Code](https://claude.com/claude-code).**
 
@@ -9,12 +9,6 @@ Many minds plan in parallel. One builds. You approve every commit.
 ![built for Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-d97757)
 ![shell](https://img.shields.io/badge/shell-bash-4EAA25)
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-
-</div>
-
-<div align="center">
-
-<img src="docs/architecture.svg" alt="Claude MUX: parallel planners feed a mux; you are the select signal, the loop is the clock, the output is a commit." width="560">
 
 </div>
 
