@@ -1,12 +1,10 @@
 <div align="center">
 
-# Claude MUX
+<img src="docs/logo.svg" alt="Claude MUX" width="440">
 
 **A multiplexer for [Claude Code](https://claude.com/claude-code).**
 
 Many minds plan in parallel. One builds. You approve every commit.
-
-*Scale Claude's thinking without losing control of the code.*
 
 ![built for Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-d97757)
 ![shell](https://img.shields.io/badge/shell-bash-4EAA25)
@@ -14,113 +12,77 @@ Many minds plan in parallel. One builds. You approve every commit.
 
 </div>
 
----
+<div align="center">
 
-## What is this?
+<img src="docs/architecture.svg" alt="Claude MUX: parallel planners feed a mux; you are the select signal, the loop is the clock, the output is a commit." width="560">
 
-Claude MUX splits Claude Code into two roles so you can think in parallel but
-ship in a single, controlled line:
+</div>
 
-- **Planners** — several read-only sessions, one per slice of a problem (UI,
-  API, auth…). They read your whole repo but can only *write task files*. They
-  never touch your source.
-- **Executor** — one worker session that picks tasks off the queue, does the
-  work, shows you the diff, and commits **only after you say OK**.
+## What it is
 
-You're the orchestrator in the middle: you decide which tasks run, and nothing
-lands without your word.
+Claude MUX splits Claude Code into two roles connected by a queue:
 
-No frameworks, no services, no SDK — just the official Claude Code CLI and a few
-shell scripts you can read top to bottom.
+- **Planners** — read-only sessions that explore the repo and write _task
+  files_. Run as many as you like, in parallel. They cannot touch your source.
+- **Executor** — one worker that picks up tasks, does the work, and commits
+  **only after you say `ok`**.
 
-## How it works
+You sit in the middle: you release which tasks run, and approve every commit.
+No frameworks, no services, no SDK — just the Claude Code CLI and a few shell
+scripts you can read top to bottom.
 
-```
-   planner      planner      planner       you, thinking in parallel.
-     ui          api          auth         each reads your repo but can
-      │           │            │           only write into .mux/
-      └─────┬─────┴─────┬──────┘
-            ▼           ▼
-   ┌────────────────────────────┐
-   │   .mux/tasks/   (the queue) │   planners drop tasks here as DRAFT
-   │                            │
-   │   • fix-redirect   READY   │ ◀─ GATE 1: you flip DRAFT → READY.
-   │   • add-login      DRAFT   │           nothing runs until you do.
-   └─────────────┬──────────────┘
-                 ▼  oldest READY first
-          ┌────────────┐
-          │  executor  │   one worker, looping. claims a task,
-          │   (loop)   │   does it, shows you the diff, waits…
-          └─────┬──────┘
-                ▼  you review → "ok"
-            git commit       ◀─ GATE 2: never without your approval.
-```
+It's two patterns, each useful alone:
+
+- **Multiplexer** — many parallel planners, one serial executor. Planning is
+  safe (no write access); execution is privileged. No agents fight over the tree.
+- **Gated loop** — the executor loops on a timer but commits nothing on its own.
+  Autonomous about _when_ it works, never about _what_ lands.
 
 ## Quickstart
 
 ```bash
-# 1. clone this repo, then install into ANY git repo you work in:
+# install into any git repo you work in:
 ./install.sh /path/to/your/repo
 
-# 2. in your repo, two terminal tabs:
-.claude/mux/executor.sh          # tab 1 — the worker (loops every 5m)
-.claude/mux/planner.sh           # tab 2 — a planner; open as many as you like
-
-# 3. see the queue any time:
-.claude/mux/status.sh
+# then, in that repo:
+.claude/mux/executor.sh     # the worker (loops every 5m; pass an interval to change)
+.claude/mux/planner.sh      # a planner — open as many as you like
+.claude/mux/status.sh       # see the queue
 ```
 
-The installer drops everything into `.claude/mux/` and hides it via the repo's
-`.git/info/exclude`, so **it's never tracked, committed, or seen by your
-teammates.** Re-run anytime to update — it won't touch your task queue.
-
-## The pieces
-
-| Piece | What it is |
-|-------|------------|
-| **Planner** (`planner.sh`) | A producer. Reads your whole repo, writes only under `.mux/`. Discuss one slice of the problem; it writes a task file. Run several in parallel. |
-| **Queue** (`.mux/tasks/`) | One file per task, timestamp-named so order is FIFO. Each carries a `# STATUS:`. |
-| **Executor** (`executor.sh`) | The single consumer. Loops over `READY` tasks, does each, pauses for your OK before committing. |
-| **You** | The orchestrator. You release tasks (`DRAFT → READY`) and approve every commit. |
+Everything lands in `.claude/mux/` and is hidden via `.git/info/exclude`, so it's
+never tracked, committed, or seen by teammates. Re-run `install.sh` to update; it
+won't touch your queue.
 
 ## Task lifecycle
 
-| Status | Meaning | Set by |
-|--------|---------|--------|
-| `DRAFT` | Produced by a planner, not yet released | planner |
-| `READY` | You've released it — the executor may run it | **you** (edit the file) |
-| `RUNNING` | Claimed and in flight, or paused awaiting you | executor |
-| `DONE` | Finished and committed | executor (after your OK) |
-| `FAILED` | Unworkable as written — see its `# Reason:` | executor |
+Tasks are one file each in `.mux/tasks/`, timestamp-named (FIFO), carrying a
+`# STATUS:`.
 
-While anything is `RUNNING`, the loop **starts nothing else** — so the executor
-can pause for a decision or your review as long as you need, without stacking up
-work. One task in flight, ever.
+| Status    | Meaning                                | Set by                     |
+| --------- | -------------------------------------- | -------------------------- |
+| `DRAFT`   | Written by a planner, not yet released | planner                    |
+| `READY`   | Released — the executor may run it     | **you**                    |
+| `RUNNING` | In flight, or paused awaiting you      | executor                   |
+| `DONE`    | Finished and committed                 | executor (after your `ok`) |
+| `FAILED`  | Unworkable — see its `# Reason:`       | executor                   |
 
-## Two gates keep you in charge
+Only one task runs at a time: while anything is `RUNNING`, the loop starts
+nothing else, so it can pause for your review as long as needed.
 
-Neither requires babysitting:
+## The two gates
 
-1. **Release gate.** Planners only ever produce `DRAFT`s. Nothing runs until
-   *you* flip a task to `READY`. Want strict one-at-a-time? Keep just one `READY`.
-2. **Commit gate.** The executor does the work, then **stops with the change
-   uncommitted** (review it in your editor's *Changes* panel) and waits. Say
-   `ok` → it commits and marks the task `DONE`. Ask for changes → it revises.
-   **It never commits without your approval.**
+1. **Release** — planners only produce `DRAFT`s. Nothing runs until _you_ flip a
+   task to `READY`. Want strict one-at-a-time? Keep just one `READY`.
+2. **Commit** — the executor does the work, then stops with the change
+   uncommitted and waits. Say `ok` → it commits and marks the task `DONE`. Ask
+   for changes → it revises. It never commits without you.
 
-So the "loop" isn't an autonomous committer — it's an assistant that does the
-work and waits at the gate.
-
-## Why planners can't touch your code
-
-Planner sessions launch with scoped permissions
-(`--allowedTools 'Write(./.mux/**)' 'Edit(./.mux/**)' … --setting-sources user`),
-so they can **read everything but write only inside `.mux/`**. A planner
-literally cannot modify your source — enforced by Claude Code, not by trust. The
-executor is the one and only session with full write access.
+Planners enforce gate 1 by construction: they launch scoped to
+`Write(./.mux/**)` only, so they can read everything but write nowhere but the
+queue — enforced by Claude Code, not by trust.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) CLI
-- `git` and `uuidgen` (standard on macOS/Linux)
-- bash
+- `git`, `uuidgen`, `bash` (standard on macOS/Linux)
