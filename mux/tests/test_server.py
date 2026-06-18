@@ -156,7 +156,7 @@ class LogLinesTest(unittest.TestCase):
         logdir = os.path.join(self.tmp, ".mux", "log")
         os.makedirs(logdir)
         events = [
-            {"type": "system"},
+            {"type": "system", "subtype": "init"},   # only an init event opens a cycle
             {"type": "assistant", "message": {"content": [
                 {"type": "text", "text": "thinking out loud"},
                 {"type": "tool_use", "name": "Bash", "input": {"command": "echo hi"}},
@@ -167,7 +167,7 @@ class LogLinesTest(unittest.TestCase):
             for ev in events:
                 f.write(json.dumps(ev) + "\n")
         lines = server.log_lines()
-        self.assertTrue(any("new cycle" in l for l in lines))
+        self.assertTrue(any("cycle 1" in l for l in lines))
         self.assertIn("● thinking out loud", lines)
         self.assertIn("→ Bash: echo hi", lines)
         self.assertIn("✓ all done", lines)
@@ -221,7 +221,7 @@ class HttpRoutingTest(unittest.TestCase):
         status, ctype, body = self._get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype)
-        self.assertIn(b"CLAUDE MULTIPLEXER", body)
+        self.assertIn(b"MULTIPLEXER", body)
 
     def test_api_repo_returns_configured_repo(self):
         status, ctype, body = self._get("/api/repo")
@@ -322,6 +322,34 @@ class HttpRoutingTest(unittest.TestCase):
         self.assertEqual(d, {"ok": True, "out": "ok-output"})
         # verb, id, text forwarded in order
         self.assertEqual(self.calls[-1], ("resolve", "t1", "my answer"))
+
+
+class SendDisconnectTest(unittest.TestCase):
+    """_send must not propagate a client disconnect. The web UI polls every 2s, so
+    a browser that refreshes/navigates mid-response drops the socket — the write
+    then fails with BrokenPipeError/ConnectionResetError. That is normal, not an
+    error: swallow it so the request thread doesn't dump a traceback."""
+
+    def _handler(self, wfile):
+        h = server.H.__new__(server.H)   # bypass __init__ (no real socket)
+        h.request_version = "HTTP/1.1"
+        h.requestline = "GET / HTTP/1.1"
+        h.wfile = wfile
+        return h
+
+    class _RaisingWfile:
+        def __init__(self, exc):
+            self.exc = exc
+        def write(self, b):
+            raise self.exc
+
+    def test_broken_pipe_is_swallowed(self):
+        h = self._handler(self._RaisingWfile(BrokenPipeError(32, "Broken pipe")))
+        h._send(200, "ok")  # must not raise
+
+    def test_connection_reset_is_swallowed(self):
+        h = self._handler(self._RaisingWfile(ConnectionResetError(54, "Connection reset")))
+        h._send(200, "ok")  # must not raise
 
 
 if __name__ == "__main__":
