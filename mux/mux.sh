@@ -232,7 +232,11 @@ cmd_revert() {
 cmd_ok() {
   local f; f="$(running_task)"
   git_clean && die "no file changes to commit for ${f##*/} — ask for changes, or 'mux fail'"
-  git add -A -- . ':!.mux' || die "git add failed"
+  # Stage everything, then unstage the queue so it's never committed. (A pathspec
+  # exclude like ':!.mux' instead would FAIL when .mux is gitignored; this works
+  # whether .mux is ignored — then the reset is a harmless no-op — or not.)
+  git add -A || die "git add failed"
+  git reset -q -- .mux 2>/dev/null || true
   git commit -q -m "$(commit_message "$f" "$*")" || die "git commit failed"
   local sha br; sha="$(git rev-parse --short HEAD)"; br="$(git branch --show-current 2>/dev/null || echo '?')"
   set_status "$f" DONE
