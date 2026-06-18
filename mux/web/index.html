@@ -29,7 +29,7 @@
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
- #gol{display:none;width:54px;height:18px;margin:0 0 10px;image-rendering:pixelated;opacity:.75}
+ #gol{display:inline-block;width:16px;height:16px;flex:none;border:1px solid #3a3a3a;border-radius:3px;background:#333;image-rendering:pixelated;opacity:.85}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
  #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
@@ -55,12 +55,12 @@
  #drawer .dclose:hover{border-color:var(--accent)}
  #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
 </style>
-<header><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span>
+<header><canvas id=gol width=10 height=10></canvas><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button class=primary onclick="channel()">+ channel</button></header>
 <main>
  <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
- <section><h2 class=phead>Output</h2><canvas id=gol width=18 height=6></canvas><div id=working></div><pre id=log></pre></section>
+ <section><h2 class=phead>Output</h2><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
@@ -88,15 +88,15 @@ async function pollStatus(){try{const s=await (await fetch("/api/status")).json(
    work.known=s.elapsed!=null}}
  catch(e){}
  drawWork()}
-// Conway's Game of Life heartbeat beside the running pill. Toroidal so it never
-// settles into a static board; reseeds if it empties or stalls. Runs ONLY while
-// the executor is executing — golStop() clears the interval so nothing ticks idle.
-const GOL={cols:18,rows:6,timer:null,grid:null,prev:null,still:0}
+// Conway's Game of Life brand mark in the header. Toroidal so it never settles
+// into a static board; reseeds if it empties or stalls. Always visible as a
+// logo: it animates while a task is executing and freezes on its last frame
+// (golStop clears the interval but never hides the canvas) when idle.
+const GOL={cols:10,rows:10,timer:null,grid:null,prev:null,still:0}
 function golSeed(){const n=GOL.cols*GOL.rows,g=new Uint8Array(n)
- for(let i=0;i<n;i++)g[i]=(i*2654435761>>>0)%100<35?1:0 // cheap spread, no Math.random
- // jitter the seed each call so successive reseeds differ
- const o=(GOL.still+ (GOL.timer?1:0))%n
- for(let i=0;i<n;i++)if(((i+o)*40503>>>0)%100<40)g[i]^=1
+ // Real random initial conditions (~40% density) so every reseed is different —
+ // a genuine Conway run, not a fixed loop replaying the same board.
+ for(let i=0;i<n;i++)g[i]=Math.random()<.4?1:0
  GOL.grid=g;GOL.prev=null;GOL.still=0}
 function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){let c=0
@@ -110,14 +110,14 @@ function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
  if(same){GOL.still++;if(GOL.still>1)golSeed()}else GOL.still=0}
 function golDraw(){const cv=E("gol");if(!cv)return;const ctx=cv.getContext("2d")
  const {cols,rows,grid}=GOL;ctx.clearRect(0,0,cols,rows)
- ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#e3ddd1"
+ ctx.fillStyle="#bbbbbb"
  for(let i=0;i<cols*rows;i++)if(grid[i])ctx.fillRect(i%cols,(i/cols)|0,1,1)}
-function golStart(){const cv=E("gol");if(cv)cv.style.display="inline-block"
- if(GOL.timer)return
+function golStart(){if(GOL.timer)return
  if(!GOL.grid)golSeed()
- golDraw();GOL.timer=setInterval(()=>{golStep();golDraw()},400)}
-function golStop(){if(GOL.timer){clearInterval(GOL.timer);GOL.timer=null}
- const cv=E("gol");if(cv)cv.style.display="none"}
+ golDraw();GOL.timer=setInterval(()=>{golStep();golDraw()},130)}
+// Freeze the mark on its current frame when idle — clears the interval but keeps
+// the canvas visible so it reads as a static logo (never hidden).
+function golStop(){if(GOL.timer){clearInterval(GOL.timer);GOL.timer=null}}
 async function act(verb,id,prompt){let text=""
  if(prompt){text=window.prompt(prompt);if(text===null)return}
  try{const r=await fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
@@ -166,9 +166,8 @@ async function refresh(){
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\.task\.md$/,"")}</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#8a8072;font-size:12.5px'>No tasks</div>"
- // Heartbeat runs ONLY while a task is actively executing — not for a RUNNING
- // task that's merely claimed/awaiting approval (executor idle). The task name
- // already shows in the Queue on the left, so no pill is needed here.
+ // Animate the logo only while a task is actively executing; otherwise freeze
+ // it on its last frame so it sits there as a static brand mark.
  ts.some(t=>t.executing)?golStart():golStop()
  const lg=await (await fetch("/api/log")).json()
  E("log").innerHTML=lg.slice().reverse().map(l=>{
@@ -177,6 +176,7 @@ async function refresh(){
   if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
   const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8072;font-size:12.5px'>Idle — waiting for a READY task</div>")
  pollStatus()}
+golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
 fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
 refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
