@@ -89,9 +89,6 @@ json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # Is the RUNNING task approved? / dependency of a task and its done-state.
 task_dep()   { grep -m1 -i '^# Depends-on:' "$1" | sed 's/.*Depends-on:[[:space:]]*//' | awk '{print $1}' || true; }
 
-# Value of a single-token header field (Branch, Base, …); '' if absent.
-task_field() { grep -m1 -i "^# *$2:" "$1" 2>/dev/null | sed 's/.*: *//' | awk '{print $1}' || true; }
-
 # True when the working tree has no uncommitted changes — IGNORING mux's own
 # .mux/ queue (it's metadata, never "work"), whether or not it's gitignored.
 git_clean() {
