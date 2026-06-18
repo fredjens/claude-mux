@@ -554,7 +554,7 @@ async function refresh(){
  const nowt=ts.find(t=>t.executing)||ts.find(t=>t.current&&t.status=="RUNNING")
  E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
  const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
+ E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((nowt||E("working").innerHTML)?"":"<div style='color:#8a8072;font-size:12.5px'>Idle — waiting for a READY task</div>")
  pollStatus()}
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
 fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
