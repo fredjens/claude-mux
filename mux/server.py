@@ -267,28 +267,28 @@ def spawn_planner(name=None):
 
 PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 <style>
- body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#11151a;color:#d6dde6}
- header{padding:10px 16px;background:#0c0f13;border-bottom:1px solid #222;display:flex;gap:12px;align-items:center}
- header b{color:#fff} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2c3742;
-  background:#1a212a;color:#d6dde6;border-radius:6px;padding:3px 9px} button:hover{border-color:#3d72d6}
- main{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#222;height:calc(100vh - 49px)}
- section{background:#11151a;overflow:auto;padding:12px 16px} h2{font-size:12px;letter-spacing:.08em;
-  text-transform:uppercase;color:#7c8a99;margin:0 0 10px} .t{padding:8px 10px;border:1px solid #222;
+ body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
+ header{padding:10px 16px;background:#13110e;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
+ header b{color:#d97757} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #3a342c;
+  background:#241f1a;color:#e3ddd1;border-radius:6px;padding:3px 9px} button:hover{border-color:#d97757}
+ main{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
+ section{background:#1a1815;overflow:auto;padding:12px 16px} h2{font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;color:#8a8072;margin:0 0 10px} .t{padding:8px 10px;border:1px solid #2a2620;
   border-radius:8px;margin-bottom:8px} .t .st{font-size:11px;font-weight:700;letter-spacing:.05em}
- .RUNNING{color:#e0a33e}.READY{color:#3d72d6}.DONE{color:#3da35d}.FAILED{color:#d65a5a}
- .BLOCKED{color:#c678dd}.DRAFT{color:#7c8a99} .t .nm{color:#cdd6df;margin:2px 0;cursor:pointer} .open{color:#56708f}
- button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d65a5a}
- .run{display:inline-flex;align-items:center;gap:8px;color:#e0a33e;font-size:12px}
- .shimmer{background:linear-gradient(90deg,#5a6675 0%,#9fb0c0 20%,#e6edf3 50%,#9fb0c0 80%,#5a6675 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
+ .RUNNING{color:#d97757}.READY{color:#d4a85a}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
+ .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer} .open{color:#8a7d6a}
+ button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d6705f}
+ .run{display:inline-flex;align-items:center;gap:8px;color:#d97757;font-size:12px}
+ .shimmer{background:linear-gradient(90deg,#6b5f50 0%,#b09a82 20%,#e8a888 50%,#b09a82 80%,#6b5f50 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
- .plan{margin:6px 0 0;padding:8px 10px;background:#0c0f13;border-radius:6px;color:#9fb0c0;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
+ .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
  #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
  @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
- #log .l{padding:1px 0} .la{color:#e6edf3} .lt{color:#56b6c2} .lr{color:#5bb574} .ls{color:#3f4855;margin:8px 0} .lx{color:#9aa7b4} .lg{color:#c678dd} .le{color:#d65a5a} .lm{color:#9aa7b4}
+ #log .l{padding:1px 0} .la{color:#ece6da} .lt{color:#c98c6d} .lr{color:#6fae7a} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:#b292c4} .le{color:#d6705f} .lm{color:#a89e8e}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span>
  <button onclick="planner()">+ planner</button></header>
