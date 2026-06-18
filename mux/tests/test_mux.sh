@@ -2,7 +2,7 @@
 # test_mux.sh — dependency-free bash test suite for ../mux.sh (the "verb layer").
 #
 # Proves the state-machine rules (cmd_release/claim/block/resolve/ok/fail/revert)
-# and the executor's task-selection logic (cmd_next), plus resolve_id + status
+# and the output's task-selection logic (cmd_next), plus resolve_id + status
 # --json. No bats, no extra deps — just bash + git + awk/sed/grep + python3.
 #
 # Each test runs against a THROWAWAY git repo (mktemp -d), never the real one:

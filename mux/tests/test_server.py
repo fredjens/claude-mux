@@ -163,7 +163,7 @@ class LogLinesTest(unittest.TestCase):
             ]}},
             {"type": "result", "result": "all done"},
         ]
-        with open(os.path.join(logdir, "executor.jsonl"), "w") as f:
+        with open(os.path.join(logdir, "output.jsonl"), "w") as f:
             for ev in events:
                 f.write(json.dumps(ev) + "\n")
         lines = server.log_lines()
@@ -173,7 +173,7 @@ class LogLinesTest(unittest.TestCase):
         self.assertIn("✓ all done", lines)
 
     def test_missing_log_yields_no_activity(self):
-        # No .mux/log/executor.jsonl exists; log_lines falls back to idle_reason.
+        # No .mux/log/output.jsonl exists; log_lines falls back to idle_reason.
         # Stub idle_reason so the fallback is deterministic and doesn't shell out.
         server.idle_reason = lambda: "No activity"
         self.assertEqual(server.log_lines(), ["No activity"])

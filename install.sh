@@ -35,7 +35,7 @@ esac
 cat <<EOF
 
 next:
-  • from any git repo:        mux status  ·  mux planner  ·  mux executor
+  • from any git repo:        mux status  ·  mux channel  ·  mux output
   • update every repo at once: git pull        (in $ROOT)
   • keep your queue out of git (your call — manual), e.g. globally:
         echo '.mux/' >> ~/.config/git/ignore

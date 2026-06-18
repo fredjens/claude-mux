@@ -2,34 +2,34 @@
 # mux.sh — the VERB LAYER: the only sanctioned way to change a task's state.
 #
 # Every legal move in the workflow is one subcommand here. Nothing else should
-# hand-edit a task's STATUS — you, a hook, the executor tick, or a future UI all
+# hand-edit a task's STATUS — you, a hook, the output tick, or a future UI all
 # go through these verbs, so the rules (a DRAFT can't commit, a RUNNING task
 # can't be released, etc.) live in ONE place and illegal moves are refused.
 #
 # Source of truth stays the files in .mux/tasks/*.task.md. These verbs only do
-# validated edits to those files; git (committing on `ok`) is the executor's job.
+# validated edits to those files; git (committing on `ok`) is the output's job.
 #
-#   mux planner  [name]         open a planner (reads repo, writes only .mux/)
-#   mux start    [port]         open the web view + auto-start the executor (default :8770)
+#   mux channel  [name]         open a channel (reads repo, writes only .mux/)
+#   mux start    [port]         open the web view + auto-start the output (default :8770)
 #   mux web      [port]         alias of `mux start`
-#   mux stop                    stop this repo's web UI + executor loop
-#   mux executor [interval]     headless executor loop on its own (web starts this for you)
+#   mux stop                    stop this repo's web UI + output loop
+#   mux output [interval]     headless output loop on its own (web starts this for you)
 #   mux tick                    run ONE headless cycle (for launchd/cron)
 #   mux add  <slug> [goal...]   create a DRAFT task
 #   mux ls | status             the board
 #   mux status --json           machine-readable board (for fzf/Raycast/UIs)
 #   mux board                   interactive board (fzf): preview + verb keys
-#   mux next                    the one task the executor should run now
+#   mux next                    the one task the output should run now
 #   mux show     <id>           print a task file
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
 #   mux release-all             every DRAFT -> READY (auto mode; no-op if none)
-#   mux claim    <id>           READY  -> RUNNING (executor claims it; not for you)
+#   mux claim    <id>           READY  -> RUNNING (output claims it; not for you)
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
 #   mux ok       [note...]      approve RUNNING: commit the changes -> DONE
 #   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
-#   mux fail     <id> <why...>  RUNNING-> FAILED  (executor: discard + reason)
+#   mux fail     <id> <why...>  RUNNING-> FAILED  (output: discard + reason)
 #   mux help
 #
 # <id> is any unique substring of a task's filename (usually its slug).
@@ -40,7 +40,7 @@
 #   Do NOT `mux ok` it (that would commit incomplete work). Instead:
 #     mux revert            discard the partial edits → FAILED, clean tree again
 #   then re-release it to run fresh: re-add the task (`mux add` + `mux release`)
-#   so the executor retries it from scratch — never `mux ok` an interrupted task.
+#   so the output retries it from scratch — never `mux ok` an interrupted task.
 
 set -euo pipefail
 
@@ -280,7 +280,7 @@ cmd_claim() {
 }
 
 # Throw away all uncommitted work EXCEPT the .mux queue. Safe because the
-# executor always starts from a clean tree — anything dirty is this task's work.
+# output always starts from a clean tree — anything dirty is this task's work.
 discard_changes() {
   git checkout -q -- . 2>/dev/null || true
   git clean -fdq -e .mux 2>/dev/null || true
@@ -296,7 +296,7 @@ cmd_fail() {
   echo "✗ ${f##*/}  RUNNING → FAILED  (changes discarded)"
 }
 
-# Human rejects the finished work: discard the executor's changes, mark FAILED.
+# Human rejects the finished work: discard the output's changes, mark FAILED.
 cmd_revert() {
   local f; f="$(running_task)"
   discard_changes
@@ -330,7 +330,7 @@ cmd_changes() {
   local f; f="$(running_task)"
   append_block "$f" "## Change request ($(stamp))
 $*"
-  echo "↻ ${f##*/} — revision requested; stays RUNNING, executor revises next tick"
+  echo "↻ ${f##*/} — revision requested; stays RUNNING, output revises next tick"
 }
 
 cmd_show() {
@@ -341,7 +341,7 @@ cmd_show() {
 cmd_status() {
   [ "${1:-}" = "--json" ] && { cmd_status_json; return; }
   local tasks=( "$TASKS"/*.task.md )
-  [ ${#tasks[@]} -gt 0 ] || { echo "no tasks yet — open a planner:  mux planner"; return 0; }
+  [ ${#tasks[@]} -gt 0 ] || { echo "no tasks yet — open a channel:  mux channel"; return 0; }
   printf '%-3s %-7s %s\n' "" "STATUS" "TASK"
   printf '%-3s %-7s %s\n' "" "------" "----"
   local f status marker dep depstatus note next_marked=0
@@ -370,7 +370,7 @@ cmd_status() {
   done
   echo
   echo " *  = RUNNING / awaiting you (loop holds this task; BLOCKED ones don't gate)"
-  echo " >  = next READY task the executor will pick"
+  echo " >  = next READY task the output will pick"
 }
 
 # The board as JSON — one source of truth for every UI (fzf, Raycast, web...).
@@ -414,8 +414,8 @@ cmd_list() {
   for f in "$TASKS"/*.task.md; do printf '%-7s %s\n' "$(task_status "$f")" "${f##*/}"; done
 }
 
-# The ONE task the executor should act on this cycle — prints its filename, or
-# nothing. Deterministic selection lives here (not in the executor's judgement):
+# The ONE task the output should act on this cycle — prints its filename, or
+# nothing. Deterministic selection lives here (not in the output's judgement):
 #   0. if the tree is dirty, a finished task is awaiting `mux ok` → idle (nothing)
 #   1. a RUNNING task wins (resume it) — enforces one-at-a-time
 #   2. else the FIFO-first READY task whose # Depends-on: is DONE (or absent)
@@ -452,12 +452,12 @@ cmd_board() {
 
 # --- session launchers (the only verbs that start a Claude session) ---------
 
-cmd_planner() {
-  local name="${1:-planner}"
-  echo "◆ PLANNER (producer): ${name}"
+cmd_channel() {
+  local name="${1:-channel}"
+  echo "◆ CHANNEL (producer): ${name}"
   echo "  reads your code; may write ONLY under .mux/ — cannot touch source"
   echo "  writes tasks to .mux/tasks/<timestamp>-<slug>.task.md as DRAFT"
-  echo "  YOU flip them to READY (mux release <id>); executor runs READY oldest-first"
+  echo "  YOU flip them to READY (mux release <id>); output runs READY oldest-first"
   echo "  see the queue any time:  mux status"
   echo
   # Per-session scoped permissions: ignore project settings so a broad project
@@ -466,15 +466,15 @@ cmd_planner() {
   # NOTE: pattern is .mux/** with NO leading ./ — Claude Code normalizes paths
   # to project-root-relative, and a "./" prefix makes the rule fail to match.
   exec claude \
-    -n "planner:${name}" \
+    -n "channel:${name}" \
     --setting-sources user \
     --permission-mode default \
     --allowedTools 'Read' 'Glob' 'Grep' 'Bash' 'Write(.mux/**)' 'Edit(.mux/**)' \
-    --append-system-prompt "$(sed "s/__NAME__/${name}/g" "$PROMPTS_DIR/PLANNER.md")"
+    --append-system-prompt "$(sed "s/__NAME__/${name}/g" "$PROMPTS_DIR/CHANNEL.md")"
 }
 
 # What Claude is told to do each headless cycle (one task unit, then exit).
-executor_cycle() {
+output_cycle() {
   cat <<'CYCLE'
 You are a headless worker with NO memory between runs. Run `mux next` (bash): it prints the ONE task file to work on, or nothing.
 - If it prints nothing, do NOTHING and stop.
@@ -493,17 +493,17 @@ to_seconds() { case "$1" in *h) echo $(( ${1%h} * 3600 ));; *m) echo $(( ${1%m} 
 cmd_tick() {
   mkdir -p .mux/log .mux/run
   mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
-  local log=.mux/log/executor.jsonl        # ONE rolling log — never blanks between tasks
+  local log=.mux/log/output.jsonl        # ONE rolling log — never blanks between tasks
   # Run claude in the BACKGROUND and record its pid (.mux/run/tick.pid) so a
   # stopper (kill_tick) can find and halt THIS tick's claude — otherwise the
   # grandchild outlives a `kill` of the loop and keeps editing the tree. We then
   # `wait` for that exact child and capture ITS status (the backgrounded
   # command's, not the script's $?), swallowing it: a killed claude must never
   # abort the loop (the old `|| true` semantics, preserved).
-  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(executor_cycle)" \
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(output_cycle)" \
     --dangerously-skip-permissions \
     --verbose --output-format stream-json \
-    --append-system-prompt "$(cat "$PROMPTS_DIR/EXECUTOR.md")" >> "$log" 2>&1 &
+    --append-system-prompt "$(cat "$PROMPTS_DIR/OUTPUT.md")" >> "$log" 2>&1 &
   local cpid=$!
   echo "$cpid" > .mux/run/tick.pid
   wait "$cpid" 2>/dev/null || true
@@ -517,17 +517,17 @@ cmd_tick() {
 
 # Headless loop: poll for work; spend a model run ONLY when a task is runnable.
 # No session, nothing to reprompt. Usually started for you by `mux web`.
-cmd_executor() {
+cmd_output() {
   local human="${1:-10s}" secs; secs="$(to_seconds "$human")"
   rmdir .mux/tick.lock 2>/dev/null || true     # clear a stale lock from a killed tick
-  echo "▶ executor — headless; polls for work every ${human}, runs a cycle only when there is some."
+  echo "▶ output — headless; polls for work every ${human}, runs a cycle only when there is some."
   while :; do
     [ -n "$(cmd_next)" ] && cmd_tick
     sleep "$secs"
   done
 }
 
-# Halt THIS repo's in-flight executor tick: the `claude -p` child cmd_tick
+# Halt THIS repo's in-flight output tick: the `claude -p` child cmd_tick
 # backgrounded (pid in .mux/run/tick.pid). The lock is cleared ONLY after that
 # claude is confirmed gone — never before — so the lock can't disappear while
 # the model is still editing the working tree. Defensive like cmd_stop: act only
@@ -553,12 +553,12 @@ kill_tick() {
   rmdir .mux/tick.lock 2>/dev/null || true
 }
 
-# Stop the executor loop + web server recorded for THIS repo (only ours — we
+# Stop the output loop + web server recorded for THIS repo (only ours — we
 # verify the pid is still a mux/python process, never kill a recycled pid). The
 # loop dies FIRST so it can't spawn a fresh tick, THEN we halt any in-flight one.
 cmd_stop() {
   local run=.mux/run pid name stopped=0
-  for name in web executor; do
+  for name in web output; do
     pid="$(cat "$run/$name.pid" 2>/dev/null || true)"
     if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -qE 'server\.py|mux\.sh'; then
       kill "$pid" 2>/dev/null && { echo "■ stopped $name (pid $pid)"; stopped=1; }
@@ -574,8 +574,8 @@ cmd_web() {
   local port="${1:-8770}"   # NOT 7000 — macOS AirPlay Receiver squats on 7000
   mkdir -p .mux/log .mux/run
   cmd_stop >/dev/null 2>&1                 # clean up any previous mux web for this repo
-  cmd_executor "${2:-10s}" >> .mux/log/executor.loop 2>&1 &
-  local epid=$!; echo "$epid" > .mux/run/executor.pid
+  cmd_output "${2:-10s}" >> .mux/log/output.loop 2>&1 &
+  local epid=$!; echo "$epid" > .mux/run/output.pid
   MUX_REPO="$REPO_ROOT" MUX_BIN="$SELF_DIR/mux.sh" MUX_PORT="$port" python3 "$SELF_DIR/server.py" &
   local wpid=$!; echo "$wpid" > .mux/run/web.pid
   # Kill the loop + server first (so no fresh tick spawns), then halt any
@@ -584,9 +584,9 @@ cmd_web() {
   # or the rm would delete tick.pid out from under it.
   # HUP is in the list so closing the terminal (which sends SIGHUP) tears the
   # whole tree down too — without it the script orphaned to PID 1 and its
-  # executor + in-flight claude kept running after the window was gone.
+  # output + in-flight claude kept running after the window was gone.
   trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM HUP
-  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C or closing this window stops UI + executor; or run: mux stop)"
+  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C or closing this window stops UI + output; or run: mux stop)"
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
   if [ -z "${MUX_NO_OPEN:-}" ]; then
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
@@ -617,8 +617,8 @@ case "$cmd" in
   board)          cmd_board "$@" ;;
   next)           cmd_next "$@" ;;
   _list)          cmd_list "$@" ;;
-  planner)        cmd_planner "$@" ;;
-  executor)       cmd_executor "$@" ;;
+  channel)        cmd_channel "$@" ;;
+  output)       cmd_output "$@" ;;
   tick)           cmd_tick "$@" ;;
   stop)           cmd_stop "$@" ;;
   help|-h|--help) cmd_help ;;

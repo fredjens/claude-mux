@@ -3,9 +3,9 @@
 
 Launched in a repo via `mux web`; serves that repo's .mux/ queue at
 http://127.0.0.1:<port>. Three things, nothing to memorize:
-  • watch the headless executor's live log  (read-only — it cannot be reprompted)
+  • watch the headless output's live log  (read-only — it cannot be reprompted)
   • see the task list, and act with buttons  (release / approve / answer / fail)
-  • a button to open a planner in a real terminal
+  • a button to open a channel in a real terminal
 
 All state lives in .mux/ and every action shells out to the `mux` backend — this
 server holds no logic of its own.
@@ -20,7 +20,7 @@ PORT = int(os.environ.get("MUX_PORT", "8770"))   # not 7000: macOS AirPlay uses 
 WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendored marked + theme
 
 # Provider→theme map: the UI accent + supporting pastels + header label come from
-# ONE place here, so re-skinning for a different executor backend = changing/adding
+# ONE place here, so re-skinning for a different output backend = changing/adding
 # one entry and setting MUX_PROVIDER. Unknown providers fall back to "generic".
 # The default (claude) is a warm, mellow dark-on-cream look whose accents are a
 # small family of soft pastels (apricot accent + sage/lilac/rose status roles)
@@ -32,7 +32,7 @@ THEMES = {
     "claude":  {"accent": "#e6a07c", "label": "Claude",   **_PASTELS},
     "openai":  {"accent": "#6cc0a4", "label": "OpenAI",   **_PASTELS},
     "gemini":  {"accent": "#8badf0", "label": "Gemini",   **_PASTELS},
-    "generic": {"accent": "#a89e8e", "label": "Executor", **_PASTELS},
+    "generic": {"accent": "#a89e8e", "label": "Output", **_PASTELS},
 }
 
 def theme():
@@ -56,7 +56,7 @@ def tasks():
 
 
 def git_dirty_nonmux():
-    """True if the tree has changes OUTSIDE .mux/ — exactly what blocks the executor
+    """True if the tree has changes OUTSIDE .mux/ — exactly what blocks the output
     (mirrors mux.sh git_clean: the .mux/ queue is metadata, never counts as work)."""
     r = subprocess.run(["git", "status", "--porcelain"], cwd=REPO,
                        capture_output=True, text=True)
@@ -92,7 +92,7 @@ def autopilot():
 
 
 def idle_reason():
-    """Why is nothing running right now? None when the executor has/holds work
+    """Why is nothing running right now? None when the output has/holds work
     (a cycle is mid-flight, or `mux next` has a task) — the log speaks for itself then."""
     if os.path.isdir(os.path.join(REPO, ".mux", "tick.lock")):
         return None                       # a cycle is running; let its log show
@@ -105,10 +105,10 @@ def idle_reason():
     if git_dirty_nonmux():
         if running:
             return ("Idle — a finished task is awaiting your approval. "
-                    "Approve or revert it to free the executor.")
+                    "Approve or revert it to free the output.")
         if ready:
             return ("Idle — the working tree has uncommitted changes outside .mux/. "
-                    "The executor only runs from a clean tree — commit or stash them to start.")
+                    "The output only runs from a clean tree — commit or stash them to start.")
         return "Idle — uncommitted changes outside .mux/."
     if ready:
         return "Idle — the next task is waiting on a dependency."
@@ -116,7 +116,7 @@ def idle_reason():
 
 
 def status():
-    """Live executor state for the page's working indicator.
+    """Live output state for the page's working indicator.
     executing = a tick is in flight (.mux/tick.lock exists); elapsed = seconds
     since the lock dir was created (its mtime), or None if unreadable/idle."""
     lock = os.path.join(REPO, ".mux", "tick.lock")
@@ -184,7 +184,7 @@ def result_summary(ev):
 
 def log_lines(limit=300):
     """Render the latest tick log (Claude stream-json) into readable lines."""
-    path = os.path.join(REPO, ".mux", "log", "executor.jsonl")
+    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
     out = []
     try:
         with open(path) as f:
@@ -342,12 +342,12 @@ def plan_page(name):
 
 
 def latest_summary():
-    """Return (markdown_text, meta_chips_html) for the most recent executor
-    `result` event in executor.jsonl — the final assistant summary, plus its
+    """Return (markdown_text, meta_chips_html) for the most recent output
+    `result` event in output.jsonl — the final assistant summary, plus its
     `Σ …` cost/turn stats as a meta line. Parse defensively (skip undecodable
     lines like `log_lines()` does); return a placeholder when the file is
     missing/unreadable or holds no `result` event."""
-    path = os.path.join(REPO, ".mux", "log", "executor.jsonl")
+    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
     last = None
     try:
         with open(path) as f:
@@ -359,23 +359,23 @@ def latest_summary():
                 if ev.get("type") == "result":
                     last = ev
     except OSError:
-        return "(no executor summary yet)", ""
+        return "(no output summary yet)", ""
     if last is None:
-        return "(no executor summary yet)", ""
-    text = str(last.get("result", "")).strip() or "(no executor summary yet)"
+        return "(no output summary yet)", ""
+    text = str(last.get("result", "")).strip() or "(no output summary yet)"
     return text, escape(result_summary(last))
 
 
 def summary_page():
-    """Render the latest executor summary through the shared markdown drawer page."""
+    """Render the latest output summary through the shared markdown drawer page."""
     text, meta = latest_summary()
-    return _md_page("Executor summary", meta, text)
+    return _md_page("Output summary", meta, text)
 
 
-def spawn_planner(name=None):
-    """Open a real Terminal.app window running a planner in this repo, focused."""
+def spawn_channel(name=None):
+    """Open a real Terminal.app window running a channel in this repo, focused."""
     name = re.sub(r"[^A-Za-z0-9_-]", "", name or "") or ("p" + time.strftime("%H%M%S"))
-    cmd = f'cd {json.dumps(REPO)} && {json.dumps(MUX)} planner {name}'.replace('"', '\\"')
+    cmd = f'cd {json.dumps(REPO)} && {json.dumps(MUX)} channel {name}'.replace('"', '\\"')
     # Activate FIRST, then `do script` — so the new window is created while
     # Terminal is frontmost and lands on top, instead of activate racing an
     # already-open window. `set frontmost`/index pins the new window itself.
@@ -417,7 +417,7 @@ def _read_web(*parts):
 # The front-end lives in mux/web/index.html (real HTML/CSS/JS, editable as
 # such); do_GET reads it FRESH on every "/" request and substitutes the
 # provider theme placeholders. It is read per-request (not cached at import)
-# on purpose: the executor rewrites index.html as it works, so a cached copy
+# on purpose: the output rewrites index.html as it works, so a cached copy
 # would serve a stale UI until the server is restarted.
 
 
@@ -427,7 +427,7 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("content-type", ctype)
         self.send_header("content-length", str(len(b)))
-        # Never let the browser cache the UI or its data: the executor rewrites
+        # Never let the browser cache the UI or its data: the output rewrites
         # index.html on nearly every task, and /api/* changes constantly, so a
         # cached copy means a stale page (e.g. an old esc()/log renderer running
         # against fresh data). no-store forces a fresh fetch every load.
@@ -505,8 +505,8 @@ class H(BaseHTTPRequestHandler):
             elif os.path.exists(path):
                 os.remove(path)              # absence = OFF
             self._send(200, json.dumps({"enabled": auto_enabled()}))
-        elif self.path == "/api/planner":
-            spawn_planner(d.get("name"))
+        elif self.path == "/api/channel":
+            spawn_channel(d.get("name"))
             self._send(200, json.dumps({"ok": True}))
         elif self.path == "/api/resume":
             ok = spawn_resume(d.get("id"))

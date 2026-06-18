@@ -7,7 +7,7 @@
   background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
  #counts,#provider{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
  main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
- /* Narrow viewport: stack Tasks above Executor and let the page scroll
+ /* Narrow viewport: stack Queue above Output and let the page scroll
     instead of squeezing two columns. Drop the fixed viewport height so the
     sections flow. */
  @media(max-width:720px){
@@ -51,10 +51,10 @@
 </style>
 <header><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span><span id=counts></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
- <button onclick="planner()">+ planner</button></header>
+ <button onclick="channel()">+ channel</button></header>
 <main>
  <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
- <section><h2 class=phead>Output</h2><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
+ <section><h2 class=phead>Output</h2><div id=summarybar><span class=slink onclick="openSummary()" title="open the output's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
@@ -90,8 +90,8 @@ async function act(verb,id,prompt){let text=""
   if(!d.ok)alert("mux "+verb+" failed:\n"+(d.out||("HTTP "+r.status)))}
  catch(e){alert("request failed: "+e)}
  refresh()}
-function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
- .catch(e=>alert("planner failed: "+e))}
+function channel(){fetch("/api/channel",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
+ .catch(e=>alert("channel failed: "+e))}
 // Open a Terminal continuing a stuck task's exact claude session (human-driven).
 function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})})
  .then(r=>r.json()).then(d=>{if(!d.ok)alert("resume failed:\n"+(d.out||""))}).catch(e=>alert("resume failed: "+e))}

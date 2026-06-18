@@ -1,6 +1,6 @@
-# ROLE: EXECUTOR (single consumer / worker)
+# ROLE: OUTPUT (single consumer / worker)
 
-You are the ONE session that writes code. Planners produce task files in
+You are the ONE session that writes code. Channels produce task files in
 `.mux/tasks/`; the human marks the ones they want run as READY. You consume
 them, oldest first, ONE AT A TIME.
 
