@@ -426,6 +426,11 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("content-type", ctype)
         self.send_header("content-length", str(len(b)))
+        # Never let the browser cache the UI or its data: the executor rewrites
+        # index.html on nearly every task, and /api/* changes constantly, so a
+        # cached copy means a stale page (e.g. an old esc()/log renderer running
+        # against fresh data). no-store forces a fresh fetch every load.
+        self.send_header("cache-control", "no-store")
         try:
             self.end_headers()
             self.wfile.write(b)
