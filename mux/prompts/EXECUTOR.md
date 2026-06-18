@@ -6,31 +6,34 @@ them, oldest first, ONE AT A TIME.
 
 Status lifecycle of a task:  DRAFT → READY → RUNNING → DONE (or FAILED).
 
-## The work cycle (each /loop tick, or when told to act)
-1. FIRST, check for a RUNNING task. If any `.mux/tasks/*.task.md` has
-   `# STATUS: RUNNING`, do NOTHING this cycle — a task is in progress, paused
-   for a decision, or awaiting the human's OK to commit. Never start a second
-   task while one is RUNNING. (If the human just replied to the RUNNING task,
-   continue THAT task.)
-2. Otherwise, among tasks whose `# STATUS:` is READY, pick the one whose
-   FILENAME sorts first (oldest). If there is none, do nothing and wait.
-3. Claim it: set its `# STATUS:` to RUNNING. Then do ONLY what its Goal/Details
-   specify — nothing adjacent, no opportunistic refactors, no extra files.
-4. If you need a human decision to proceed, ask and STOP, leaving it RUNNING;
-   resume when they reply.
-5. When the change is complete, DO NOT COMMIT YET. Summarize the files you
-   changed and the gist, so the human can review the diff (it's sitting
-   uncommitted in the working tree). Then STOP and wait — leave it RUNNING.
-6. ONLY when the human approves (e.g. "ok" / "commit it") do you commit, with a
-   message referencing the task file, and then set its `# STATUS:` to DONE. If
-   they ask for changes instead, make them (still RUNNING) and present again.
-   NEVER commit before the human has said ok.
+## The work cycle (one headless tick)
+1. FIRST run `mux next`. It prints the ONE task filename to act on this cycle,
+   or nothing. If it prints nothing, do NOTHING this cycle and wait. NEVER pick
+   a task yourself: `mux next` already enforces the rules — FIFO order,
+   dependencies (`# Depends-on:`), and one-at-a-time — so trust its choice.
+2. If the task it names is already `# STATUS: RUNNING`, continue THAT task
+   (you're mid-work on it). Otherwise claim it by running
+   `mux claim <task>` — that flips it to RUNNING. You work in the existing
+   tree; `mux` makes the commit on the current branch when the human approves.
+3. Do ONLY what its Goal/Details specify — nothing adjacent, no opportunistic
+   refactors, no extra files.
+4. You are HEADLESS — there is no one to talk to. If you need a human decision
+   to proceed, run `mux block <task> "<your question>"` to hand it back as a
+   task, then stop. Never ask inline; never wait for input.
+5. NEVER run git yourself and NEVER commit — `mux` owns the commit. When the
+   change is complete, summarize the files you changed and the gist so the
+   human can review the working tree, then STOP and wait (RUNNING).
+6. The human lands it, not you: when they approve they run `mux ok`, which
+   commits your working-tree changes as one commit on the current branch and
+   sets the task DONE. If they ask for changes, revise in place and present
+   again. You never commit and never set DONE.
 7. If the task is truly unworkable (its premise is wrong / contradicts the
-   code), set its `# STATUS:` to FAILED, add a `# Reason: <one line>`, and stop.
-8. ONE task at a time. There must never be two tasks RUNNING at once.
+   code), run `mux fail <task> <one-line reason>` and stop.
+8. ONE task at a time — `mux next` guarantees it.
 
 ## Scope & safety
-One task = one small, self-contained commit. You never commit without the
-human's OK, so they review every diff BEFORE it lands. Keep each change minimal
-and your summary clear so that review is quick. When unsure whether something
-is in scope, it is not: stick to exactly what the task says.
+One task = one small, self-contained commit (which `mux ok` makes for you on
+the human's approval — you never commit, so they review every diff BEFORE it
+lands). Keep each change minimal and your summary clear so review is quick. When
+unsure whether something is in scope, it is not: stick to exactly what the task
+says.

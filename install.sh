@@ -1,35 +1,42 @@
 #!/usr/bin/env bash
-# install.sh — drop claude-mux into a target repo, fully HIDDEN.
+# install.sh — link the `mux` command onto your PATH, ONCE.
 #
-# Everything lands in ONE folder, .claude/mux/, so your repo root stays clean.
-# The installer also registers it in the target repo's .git/info/exclude — a
-# per-repo file that is NEVER committed — so git won't track, show
-# (`git status`), or commit any of it, and collaborators never see it.
+# claude-mux is centralized: a single checkout, symlinked onto your PATH, works
+# in every git repo. `mux` finds the current repo and its .mux/ queue itself
+# (via `git rev-parse`), so nothing is copied per-repo. Update everything later
+# with one `git pull` in this checkout.
 #
-# Usage:  ./install.sh /path/to/your/repo
+# Usage:  ./install.sh [bin-dir]        # bin-dir defaults to ~/.local/bin
 
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST="${1:?usage: ./install.sh /path/to/your/repo}"
-DEST="$(cd "$DEST" && pwd)"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mux/mux.sh"
+[ -f "$SRC" ] || { echo "✗ can't find $SRC"; exit 1; }
+ROOT="$(cd "$(dirname "$SRC")/.." && pwd)"
 
-[ -d "$DEST/.git" ] || { echo "✗ $DEST is not a git repo (no .git/ found)"; exit 1; }
+BIN="${1:-$HOME/.local/bin}"
+mkdir -p "$BIN"
+LINK="$BIN/mux"
 
-# 1. Copy the whole payload into one folder.
-mkdir -p "$DEST/.claude/mux"
-cp "$SRC/mux/"*.sh "$DEST/.claude/mux/"
-cp -R "$SRC/mux/prompts" "$DEST/.claude/mux/"
-chmod +x "$DEST/.claude/mux/"*.sh
+if [ -L "$LINK" ]; then
+  ln -sf "$SRC" "$LINK"; echo "✓ relinked: $LINK -> $SRC"
+elif [ -e "$LINK" ]; then
+  echo "✗ $LINK exists and is not a symlink — move it aside, then re-run"; exit 1
+else
+  ln -s "$SRC" "$LINK"; echo "✓ linked:   $LINK -> $SRC"
+fi
 
-# 2. Hide from git via the per-repo, never-committed exclude file.
-EXCLUDE="$DEST/.git/info/exclude"
-mkdir -p "$DEST/.git/info"
-add() { grep -qxF "$1" "$EXCLUDE" 2>/dev/null || echo "$1" >> "$EXCLUDE"; }
-add "# claude-mux (local-only workflow, never committed)"
-add "/.claude/mux/"
-add "/.mux/"
+case ":$PATH:" in
+  *":$BIN:"*) ;;
+  *) echo "⚠ $BIN is not on your PATH — add it:"
+     echo "    echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.zshrc && exec zsh" ;;
+esac
 
-echo "✓ installed into $DEST/.claude/mux/"
-echo "  hidden via $EXCLUDE (not tracked, not committed, not visible to others)"
-echo "  start with:  cd $DEST && .claude/mux/executor.sh"
+cat <<EOF
+
+next:
+  • from any git repo:        mux status  ·  mux planner  ·  mux executor
+  • update every repo at once: git pull        (in $ROOT)
+  • keep your queue out of git (your call — manual), e.g. globally:
+        echo '.mux/' >> ~/.config/git/ignore
+EOF
