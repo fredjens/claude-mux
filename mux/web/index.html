@@ -104,7 +104,7 @@ function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
  if(same){GOL.still++;if(GOL.still>1)golSeed()}else GOL.still=0}
 function golDraw(){const cv=E("gol");if(!cv)return;const ctx=cv.getContext("2d")
  const {cols,rows,grid}=GOL;ctx.clearRect(0,0,cols,rows)
- ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#7fcac4"
+ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#e3ddd1"
  for(let i=0;i<cols*rows;i++)if(grid[i])ctx.fillRect(i%cols,(i/cols)|0,1,1)}
 function golStart(){const cv=E("gol");if(cv)cv.style.display="inline-block"
  if(GOL.timer)return
@@ -135,21 +135,22 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
   auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
- // Resume/direct the recorded session — but NEVER while a tick is live
- // (t.executing): a second claude would collide with the headless tick.
- // STUCK (BLOCKED or RUNNING killed mid-tick) → "resume ⇥"; a healthy
- // RUNNING task awaiting approval → "direct ⇥" to steer it interactively.
- if(t.session&&!t.executing){
-  const stuck=t.awaiting_answer||t.interrupted
-  const awaiting=t.status=="RUNNING"&&!stuck
-  if(stuck||awaiting)
-   b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}
  if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return ""
   if(!auto)b.push(`<button onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
+ // Resume/direct the recorded session — but NEVER while a tick is live
+ // (t.executing): a second claude would collide with the headless tick.
+ // STUCK (BLOCKED or RUNNING killed mid-tick) → "resume ⇥"; a healthy
+ // RUNNING task awaiting approval → "direct ⇥" to steer it interactively.
+ // Pushed LAST so it renders after revert.
+ if(t.session&&!t.executing){
+  const stuck=t.awaiting_answer||t.interrupted
+  const awaiting=t.status=="RUNNING"&&!stuck
+  if(stuck||awaiting)
+   b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}
  return `<div class=acts>${b.join("")}</div>`}
 async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()

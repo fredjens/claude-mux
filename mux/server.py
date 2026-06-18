@@ -22,15 +22,15 @@ WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendo
 # Provider→theme map: the UI accent + supporting pastels + header label come from
 # ONE place here, so re-skinning for a different output backend = changing/adding
 # one entry and setting MUX_PROVIDER. Unknown providers fall back to "generic".
-# The default (claude) is a warm, mellow dark-on-cream look whose accents are a
-# small family of bright-but-muted pastels (a cool cyan accent + mint/lilac/pink
-# status roles) — fresh and a little playful against the warm grays, never neutral
-# grey and deliberately not the old terracotta orange. The success/subagent/danger
-# roles are status semantics (shared across providers); only `accent` and `label`
-# are brand-specific.
+# The default (claude) is a warm, mellow dark-on-cream look. The `accent` is NOT
+# a hue here — it's a bright warm cream used purely as a "live/active/hover"
+# highlight (it brightens against the grey defaults rather than coloring). Real
+# hue is reserved for meaning: mint/lilac/pink status pastels + the terminal log
+# roles. The success/subagent/danger roles are status semantics (shared across
+# providers); only `accent` and `label` are brand-specific.
 _PASTELS = {"success": "#aed99a", "subagent": "#c9aef0", "danger": "#e8a0ac"}
 THEMES = {
-    "claude":  {"accent": "#7fcac4", "label": "Claude",   **_PASTELS},
+    "claude":  {"accent": "#e3ddd1", "label": "Claude",   **_PASTELS},
     "openai":  {"accent": "#6cc0a4", "label": "OpenAI",   **_PASTELS},
     "gemini":  {"accent": "#8badf0", "label": "Gemini",   **_PASTELS},
     "generic": {"accent": "#a89e8e", "label": "Output", **_PASTELS},
