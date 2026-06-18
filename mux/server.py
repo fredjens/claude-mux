@@ -273,7 +273,7 @@ def _md_page(title, meta_chips_html, body_md):
     bjs = json.dumps(body_md).replace("</", "<\\/")
     acc = theme()["accent"]   # link color follows the active provider accent
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
-<script src="/web/marked.min.js"></script>
+<script src="/web/vendor/marked.min.js"></script>
 <style>body{{margin:0;background:#1a1815;color:#dcd6ca}}
  ::selection{{background:#3a2d24;color:#f0ebe0}}
  .md{{box-sizing:border-box;max-width:68ch;margin:0 auto;padding:48px 40px 96px;min-height:100vh;
@@ -401,166 +401,17 @@ def spawn_resume(sid):
     return True
 
 
-PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
-<style>
- :root{--accent:__ACCENT__}
- body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
- header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
- header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
-  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
- #counts,#provider{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
- /* Resizable split: a draggable #splitter sits between the two sections as a
-    grid column; --split (a %) drives the Tasks column, 1fr fills the rest. */
- main{display:grid;grid-template-columns:var(--split,40%) 6px 1fr;background:#2a2620;height:calc(100vh - 49px)}
- #splitter{background:#2a2620;cursor:col-resize}
- #splitter:hover,body.dragging #splitter{background:var(--accent)}
- body.dragging{user-select:none}
- /* Narrow viewport: stack Tasks above Executor and let the page scroll
-    instead of squeezing two columns. Hide the splitter (no col-resize when
-    stacked) and drop the fixed viewport height so the sections flow. */
- @media(max-width:720px){
-  main{grid-template-columns:1fr;height:auto}
-  #splitter{display:none}
-  section{min-height:50vh}
- }
- section{background:#1a1815;overflow:auto;padding:12px 16px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
- .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
- .RUNNING{color:var(--accent)}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
- .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
- .t .nm:hover{color:#d97757;text-decoration:underline}
- button.danger{color:#8a8072} button.danger:hover{border-color:#c5836b;color:#c5836b}
- #autobtn.on{border-color:var(--accent);color:var(--accent)}
- .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
- .shimmer{background:linear-gradient(90deg,#6b5f50 0%,#b09a82 20%,#e8a888 50%,#b09a82 80%,#6b5f50 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
- @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
- .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
- .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
- #summarybar{margin:0 0 10px}
- #summarybar .slink{cursor:pointer;font-size:12px;color:#8a8072}
- #summarybar .slink:hover{color:#e3ddd1}
- #nowrunning:empty{display:none}
- #nowrunning .pill{display:inline-block;cursor:pointer;font-size:12px;color:var(--accent);margin:0 0 10px}
- #nowrunning .pill:hover{color:#e3ddd1}
- #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
- #working:empty{margin:0}
- #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
- @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
- #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
- #log .l{padding:1px 0} .la{color:#ece6da} .lt{color:#c98c6d} .lr{color:#6fae7a} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:#b292c4} .le{color:#d6705f} .lm{color:#a89e8e}
- #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
- #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2620;
-  display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
- body.drawer-open #backdrop{opacity:1;pointer-events:auto}
- body.drawer-open #drawer{transform:translateX(0)}
- #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#0c0f13}
- #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#d6dde6;border-radius:6px;padding:1px 9px;line-height:1.4}
- #drawer .dclose:hover{border-color:var(--accent)}
- #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
-</style>
-<header><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span><span id=counts></span>
- <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
- <button onclick="planner()">+ planner</button></header>
-<main>
- <section><div id=tasks></div></section>
- <div id=splitter></div>
- <section><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
-</main>
-<div id=backdrop onclick="closePlan()"></div>
-<div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
-<script>
-const E=(s)=>document.getElementById(s)
-const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
-// Draggable splitter: --split is the Tasks-column width as a %, clamped 20-80%,
-// persisted in localStorage (mux.split). Absent -> CSS default of 40%.
-(function(){const saved=localStorage.getItem("mux.split")
- if(saved)document.documentElement.style.setProperty("--split",saved+"%")
- const sp=E("splitter"),main=document.querySelector("main")
- sp.addEventListener("pointerdown",e=>{e.preventDefault();sp.setPointerCapture(e.pointerId)
-  document.body.classList.add("dragging")
-  const move=ev=>{const r=main.getBoundingClientRect()
-   let pct=(ev.clientX-r.left)/r.width*100
-   pct=Math.max(20,Math.min(80,pct))
-   document.documentElement.style.setProperty("--split",pct+"%")
-   localStorage.setItem("mux.split",pct.toFixed(2))}
-  const up=()=>{document.body.classList.remove("dragging")
-   sp.removeEventListener("pointermove",move);sp.removeEventListener("pointerup",up)}
-  sp.addEventListener("pointermove",move);sp.addEventListener("pointerup",up)})
-})()
-function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
-function openSummary(){E("planframe").src='/summary';document.body.classList.add("drawer-open")}
-function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
-document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
-// Working indicator: server says executing/elapsed (polled in refresh); the
-// counter is driven client-side from a start time so it ticks every second
-// without hammering the server. work.start=null means no cycle in flight.
-let work={start:null,known:false}
-function drawWork(){const w=E("working");if(!w)return
- if(work.start===null){w.innerHTML="";return}
- const secs=work.known?Math.max(0,Math.floor((Date.now()-work.start)/1000)):null
- w.innerHTML='<span class=glyph>✳</span><span class=shimmer>Working…'+(secs===null?"":" "+secs+"s")+'</span>'}
-async function pollStatus(){try{const s=await (await fetch("/api/status")).json()
-  if(!s.executing){work.start=null;work.known=false}
-  else{const base=Date.now()-(s.elapsed||0)*1000
-   // Re-sync start only on a new cycle or first sight, so the local counter
-   // stays smooth instead of jumping each poll.
-   if(work.start===null||Math.abs(base-work.start)>3000)work.start=base
-   work.known=s.elapsed!=null}}
- catch(e){}
- drawWork()}
-async function act(verb,id,prompt){let text=""
- if(prompt){text=window.prompt(prompt);if(text===null)return}
- try{const r=await fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
-   body:JSON.stringify({verb,id,text})})
-  const d=await r.json()
-  if(!d.ok)alert("mux "+verb+" failed:\\n"+(d.out||("HTTP "+r.status)))}
- catch(e){alert("request failed: "+e)}
- refresh()}
-function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
- .catch(e=>alert("planner failed: "+e))}
-// Open a Terminal continuing a stuck task's exact claude session (human-driven).
-function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})})
- .then(r=>r.json()).then(d=>{if(!d.ok)alert("resume failed:\\n"+(d.out||""))}).catch(e=>alert("resume failed: "+e))}
-// Auto mode (persisted server-side). When ON the toggle does the Release/Approve
-// gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
-let auto=false
-function drawAuto(){const b=E("autobtn");if(!b)return
- b.textContent="Auto mode: "+(auto?"on":"off");b.classList.toggle("on",auto)}
-async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
-   headers:{"content-type":"application/json"},body:JSON.stringify({enabled:!auto})})
-  auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
- drawAuto();refresh()}
-function buttons(t){const b=[],f=t.file
- // Resume only for stuck tasks (BLOCKED, or RUNNING killed mid-tick) — never a
- // normally executing task: a second claude would collide with the live tick.
- if(t.session&&(t.awaiting_answer||t.interrupted))
-  b.push(`<button onclick="resume('${t.session}')">resume ⇥</button>`)
- if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
- if(t.status=="RUNNING"){
-  if(t.executing)return ""
-  if(!auto)b.push(`<button onclick="act('ok')">Approve</button>`)
-  b.push(`<button class=danger onclick="if(confirm('Discard this task\\'s changes?'))act('revert')">revert</button>`)}
- if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
- return `<div class=acts>${b.join("")}</div>`}
-async function refresh(){
- const ts=await (await fetch("/api/tasks")).json()
- const rank=s=>s=="DONE"?1:0; ts.sort((a,b)=>rank(a.status)-rank(b.status))
- E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
-  `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
-  `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
-  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span></div>`+
-  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8072;font-size:12.5px'>No tasks</div>"
- const order=["RUNNING","READY","BLOCKED","DRAFT","FAILED","DONE"]
- const by={};ts.forEach(t=>by[t.status]=(by[t.status]||0)+1)
- E("counts").innerHTML=order.filter(s=>by[s]).map(s=>`<span class=${s}>${by[s]} ${s.toLowerCase()}</span>`).join("<span class=sep>·</span>")
- const nowt=ts.find(t=>t.executing)||ts.find(t=>t.current&&t.status=="RUNNING")
- E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
- const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((nowt||E("working").innerHTML)?"":"<div style='color:#8a8072;font-size:12.5px'>Idle — waiting for a READY task</div>")
- pollStatus()}
-fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
-fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
-refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
-</script>"""
+def _read_web(*parts):
+    """Read a file under mux/web/ relative to THIS module (not the caller's
+    CWD — mux runs from inside arbitrary target repos), as text."""
+    with open(os.path.join(WEB, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+# The front-end lives in mux/web/index.html (real HTML/CSS/JS, editable as
+# such); the server reads it at import time and substitutes the provider
+# theme placeholders per request in do_GET.
+PAGE = _read_web("index.html")
 
 
 class H(BaseHTTPRequestHandler):
@@ -605,10 +456,17 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/summary":
             self._send(200, summary_page(), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
-            name = os.path.basename(self.path.split("?")[0])
-            ctype = "text/css" if name.endswith(".css") else "application/javascript"
+            # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
+            # against WEB and confined to it — normpath collapses any ../ so a
+            # request can't escape the web dir.
+            rel = urllib.parse.unquote(self.path[len("/web/"):].split("?")[0])
+            full = os.path.normpath(os.path.join(WEB, rel))
+            if full != WEB and not full.startswith(WEB + os.sep):
+                self._send(404, "not found", "text/plain")
+                return
+            ctype = "text/css" if full.endswith(".css") else "application/javascript"
             try:
-                with open(os.path.join(WEB, name), "rb") as fh:
+                with open(full, "rb") as fh:
                     self._send(200, fh.read(), ctype)
             except OSError:
                 self._send(404, "not found", "text/plain")
