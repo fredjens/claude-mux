@@ -229,8 +229,7 @@ async function refresh(){
   `<div class=nm onclick="window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open>↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
  const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
- E("log").scrollTop=E("log").scrollHeight}
+ E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")}
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
 refresh();setInterval(refresh,2000)
 </script>"""
