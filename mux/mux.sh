@@ -26,6 +26,7 @@
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
 #   mux ok       [note...]      approve RUNNING: commit the changes -> DONE
+#   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
 #   mux fail     <id> <why...>  RUNNING-> FAILED  (executor: discard + reason)
 #   mux help
