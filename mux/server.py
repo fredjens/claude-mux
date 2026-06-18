@@ -308,6 +308,10 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+ #nowrunning:empty{display:none}
+ #nowrunning .pill{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;
+  background:#13110e;border:1px solid #3a342c;color:#d8d2c6;border-radius:999px;padding:3px 10px;margin:0 0 10px}
+ #nowrunning .pill:hover{border-color:#d97757}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
  #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
@@ -329,7 +333,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <button onclick="planner()">+ planner</button></header>
 <main>
  <section><h2>Tasks</h2><div id=tasks></div></section>
- <section><h2>Executor</h2><div id=working></div><pre id=log></pre></section>
+ <section><h2>Executor</h2><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
@@ -391,6 +395,8 @@ async function refresh(){
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open onclick="event.stopPropagation();window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open in new tab">↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
+ const nowt=ts.find(t=>t.executing)||ts.find(t=>t.current&&t.status=="RUNNING")
+ E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">📄 ${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
  const lg=await (await fetch("/api/log")).json()
  E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
  pollStatus()}
