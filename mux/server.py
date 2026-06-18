@@ -100,6 +100,8 @@ def log_lines(limit=300):
             raw = f.readlines()[-limit:]
     except OSError:
         return [idle_reason() or "Starting…"]
+    cycle = 0
+    thinking = False  # whether the last rendered line is the "thinking…" line
     for line in raw:
         try:
             ev = json.loads(line)
@@ -107,15 +109,31 @@ def log_lines(limit=300):
             continue
         t = ev.get("type")
         if t == "system":
-            out.append("─────────── new cycle ───────────")
+            sub = ev.get("subtype")
+            if sub == "init":
+                # An `init` event is the only true per-`claude -p` boundary
+                # (it carries a fresh session_id). All other system subtypes
+                # (thinking_tokens, hook_started, …) must NOT draw a divider.
+                cycle += 1
+                out.append(f"─────────── cycle {cycle} ───────────")
+                thinking = False
+            elif sub == "thinking_tokens":
+                # Collapse consecutive thinking events into one muted line.
+                if not thinking:
+                    out.append("  · thinking…")
+                    thinking = True
+            # any other system subtype: ignore (no divider, no crash)
         elif t == "assistant":
             for blk in ev.get("message", {}).get("content", []):
                 if blk.get("type") == "text" and blk.get("text", "").strip():
                     out.append("● " + blk["text"].strip())
+                    thinking = False
                 elif blk.get("type") == "tool_use":
                     out.append(tool_line(blk))
+                    thinking = False
         elif t == "result":
             out.append("✓ " + str(ev.get("result", "done")).strip())
+            thinking = False
     return out or [idle_reason() or "Starting…"]
 
 
