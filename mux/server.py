@@ -427,6 +427,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
  .RUNNING{color:var(--accent)}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
  .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
+ .t .nm:hover{color:#d97757;text-decoration:underline}
  button.danger{color:#8a8072} button.danger:hover{border-color:#c5836b;color:#c5836b}
  #autobtn.on{border-color:var(--accent);color:var(--accent)}
  .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
