@@ -246,6 +246,69 @@ class HttpRoutingTest(unittest.TestCase):
             self._get("/nope")
         self.assertEqual(cm.exception.code, 404)
 
+    def test_auto_get_reflects_marker_file(self):
+        # Absent marker -> off; present -> on.
+        status, _, body = self._get("/api/auto")
+        self.assertEqual(json.loads(body), {"enabled": False})
+        os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
+        open(os.path.join(self.tmp, ".mux", "auto"), "w").close()
+        _, _, body = self._get("/api/auto")
+        self.assertEqual(json.loads(body), {"enabled": True})
+
+    def test_auto_post_creates_and_removes_marker(self):
+        marker = os.path.join(self.tmp, ".mux", "auto")
+        os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
+
+        def post(enabled):
+            payload = json.dumps({"enabled": enabled}).encode()
+            req = urllib.request.Request(
+                self._url("/api/auto"), data=payload,
+                headers={"content-type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req) as r:
+                return json.loads(r.read())
+
+        self.assertEqual(post(True), {"enabled": True})
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual(post(False), {"enabled": False})
+        self.assertFalse(os.path.exists(marker))
+
+    def test_api_tasks_autopilot_releases_then_approves(self):
+        # With .mux/auto present and a finished (dirty-tree, non-interrupted,
+        # not-executing) RUNNING task, /api/tasks must call release-all then ok.
+        os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
+        open(os.path.join(self.tmp, ".mux", "auto"), "w").close()
+        server.tasks = lambda: [{"file": "r.task.md", "status": "RUNNING",
+                                 "interrupted": False}]
+        orig_status, orig_dirty = server.status, server.git_dirty_nonmux
+        self.addCleanup(lambda: setattr(server, "status", orig_status))
+        self.addCleanup(lambda: setattr(server, "git_dirty_nonmux", orig_dirty))
+        server.status = lambda: {"executing": False, "elapsed": None}
+        server.git_dirty_nonmux = lambda: True
+
+        self._get("/api/tasks")
+        verbs = [c[0] for c in self.calls]
+        self.assertIn(("release-all",), self.calls)
+        self.assertIn(("ok",), self.calls)
+        # release before approve
+        self.assertLess(verbs.index("release-all"), verbs.index("ok"))
+
+    def test_api_tasks_autopilot_skips_ok_on_clean_tree(self):
+        # Auto on, but the tree is clean: release-all still runs, ok must NOT.
+        os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
+        open(os.path.join(self.tmp, ".mux", "auto"), "w").close()
+        server.tasks = lambda: [{"file": "r.task.md", "status": "RUNNING",
+                                 "interrupted": False}]
+        orig_status, orig_dirty = server.status, server.git_dirty_nonmux
+        self.addCleanup(lambda: setattr(server, "status", orig_status))
+        self.addCleanup(lambda: setattr(server, "git_dirty_nonmux", orig_dirty))
+        server.status = lambda: {"executing": False, "elapsed": None}
+        server.git_dirty_nonmux = lambda: False
+
+        self._get("/api/tasks")
+        self.assertIn(("release-all",), self.calls)
+        self.assertNotIn(("ok",), self.calls)
+
     def test_post_verb_forwards_argv_in_order(self):
         payload = json.dumps({"verb": "resolve", "id": "t1", "text": "my answer"}).encode()
         req = urllib.request.Request(

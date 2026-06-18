@@ -47,6 +47,30 @@ def git_dirty_nonmux():
     return False
 
 
+def auto_enabled():
+    """True when auto mode is ON — persisted as the EXISTENCE of .mux/auto (on
+    disk so it survives restart, inside .mux/ so it never counts as work)."""
+    return os.path.exists(os.path.join(REPO, ".mux", "auto"))
+
+
+def autopilot():
+    """One hands-off cycle, piggy-backed on the /api/tasks poll when auto is ON.
+    Flips ONLY the two human gates — release (in bulk) then approve — never
+    auto-claims, reverts, fails, or resolves. Order matters: release first.
+
+    Auto-approve fires only when a finished RUNNING task is genuinely waiting:
+    it exists, its tick is NOT in flight, it is not flagged interrupted, and the
+    tree is dirty outside .mux/ (real work to commit). Any miss → do nothing
+    this cycle (never `mux ok` a clean tree — it would die — or a live tick)."""
+    mux("release-all")
+    if status()["executing"]:
+        return
+    ts = tasks()
+    running = next((t for t in ts if t.get("status") == "RUNNING"), None)
+    if running and not running.get("interrupted") and git_dirty_nonmux():
+        mux("ok")
+
+
 def idle_reason():
     """Why is nothing running right now? None when the executor has/holds work
     (a cycle is mid-flight, or `mux next` has a task) — the log speaks for itself then."""
@@ -278,6 +302,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  .RUNNING{color:#d97757}.READY{color:#d4a85a}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
  .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer} .open{color:#8a7d6a}
  button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d6705f}
+ #autobtn.on{border-color:#d97757;color:#d97757;background:#2a1d16}
  .run{display:inline-flex;align-items:center;gap:8px;color:#d97757;font-size:12px}
  .shimmer{background:linear-gradient(90deg,#6b5f50 0%,#b09a82 20%,#e8a888 50%,#b09a82 80%,#6b5f50 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
@@ -300,6 +325,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #drawer iframe{flex:1;width:100%;border:0;background:#fff}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span>
+ <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button onclick="planner()">+ planner</button></header>
 <main>
  <section><h2>Tasks</h2><div id=tasks></div></section>
@@ -340,11 +366,20 @@ async function act(verb,id,prompt){let text=""
  refresh()}
 function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
  .catch(e=>alert("planner failed: "+e))}
+// Auto mode (persisted server-side). When ON the toggle does the Release/Approve
+// gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
+let auto=false
+function drawAuto(){const b=E("autobtn");if(!b)return
+ b.textContent="Auto mode: "+(auto?"on":"off");b.classList.toggle("on",auto)}
+async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
+   headers:{"content-type":"application/json"},body:JSON.stringify({enabled:!auto})})
+  auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
+ drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
- if(t.status=="DRAFT")b.push(`<button onclick="act('release','${f}')">Release</button>`)
+ if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return ""
-  b.push(`<button onclick="act('ok')">Approve</button>`)
+  if(!auto)b.push(`<button onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
  return `<div class=acts>${b.join("")}</div>`}
@@ -360,6 +395,7 @@ async function refresh(){
  E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
  pollStatus()}
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
+fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
 refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
 </script>"""
 
@@ -384,7 +420,11 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/":
             self._send(200, PAGE, "text/html; charset=utf-8")
         elif self.path == "/api/tasks":
+            if auto_enabled():
+                autopilot()          # release-all then (if safe) ok, BEFORE the board
             self._send(200, json.dumps(tasks()))
+        elif self.path == "/api/auto":
+            self._send(200, json.dumps({"enabled": auto_enabled()}))
         elif self.path == "/api/log":
             self._send(200, json.dumps(log_lines()))
         elif self.path == "/api/repo":
@@ -413,6 +453,13 @@ class H(BaseHTTPRequestHandler):
             if d.get("text"): args.append(d["text"])
             ok, out = mux(*args)
             self._send(200, json.dumps({"ok": ok, "out": out}))
+        elif self.path == "/api/auto":
+            path = os.path.join(REPO, ".mux", "auto")
+            if d.get("enabled"):
+                open(path, "w").close()      # presence = ON
+            elif os.path.exists(path):
+                os.remove(path)              # absence = OFF
+            self._send(200, json.dumps({"enabled": auto_enabled()}))
         elif self.path == "/api/planner":
             spawn_planner(d.get("name"))
             self._send(200, json.dumps({"ok": True}))

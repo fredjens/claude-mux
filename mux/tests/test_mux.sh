@@ -125,6 +125,29 @@ test_happy_path() {
 }
 
 # ==========================================================================
+# 2b. release-all flips every DRAFT to READY, leaves other statuses untouched,
+#     and is a clean no-op (exit 0) when there are no DRAFTs.
+# ==========================================================================
+test_release_all() {
+  header "release-all flips all DRAFTs, leaves others, no-ops cleanly"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-d1.task.md" DRAFT
+  mk_task "$d" "20200102-000000-d2.task.md" DRAFT
+  mk_task "$d" "20200103-000000-rdy.task.md" READY
+  mk_task "$d" "20200104-000000-run.task.md" RUNNING
+  m "$d" release-all
+  assert_zero "release-all exits 0"
+  assert_status "first DRAFT -> READY"  READY "$d/.mux/tasks/20200101-000000-d1.task.md"
+  assert_status "second DRAFT -> READY" READY "$d/.mux/tasks/20200102-000000-d2.task.md"
+  assert_status "READY task untouched"  READY "$d/.mux/tasks/20200103-000000-rdy.task.md"
+  assert_status "RUNNING task untouched" RUNNING "$d/.mux/tasks/20200104-000000-run.task.md"
+
+  # No DRAFTs left: a second call must still exit 0 (the UI calls it on a timer).
+  m "$d" release-all
+  assert_zero "release-all is a clean no-op when there are no DRAFTs"
+}
+
+# ==========================================================================
 # 3. Illegal transitions are refused with non-zero exit.
 # ==========================================================================
 test_illegal_transitions() {
@@ -494,6 +517,7 @@ STUB
 # --- run -------------------------------------------------------------------
 test_add
 test_happy_path
+test_release_all
 test_illegal_transitions
 test_claim_clean_check
 test_block_resolve

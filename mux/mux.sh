@@ -22,6 +22,7 @@
 #   mux next                    the one task the executor should run now
 #   mux show     <id>           print a task file
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
+#   mux release-all             every DRAFT -> READY (auto mode; no-op if none)
 #   mux claim    <id>           READY  -> RUNNING (executor claims it; not for you)
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
@@ -217,6 +218,18 @@ cmd_release() {
   require_status "$f" DRAFT
   set_status "$f" READY
   echo "→ ${f##*/}  DRAFT → READY"
+}
+
+# Release EVERY DRAFT task to READY in one shot — what auto mode calls on a timer.
+# Leaves all other statuses untouched, and is a clean no-op (exit 0) when there
+# are no DRAFTs, so a UI calling it on a poll never sees a spurious error.
+cmd_release_all() {
+  local f
+  for f in "$TASKS"/*.task.md; do
+    [ "$(task_status "$f")" = DRAFT ] || continue
+    set_status "$f" READY
+    echo "→ ${f##*/}  DRAFT → READY"
+  done
 }
 
 cmd_block() {
@@ -564,6 +577,7 @@ cmd="${1:-status}"; shift || true
 case "$cmd" in
   add)            cmd_add "$@" ;;
   release)        cmd_release "$@" ;;
+  release-all)    cmd_release_all "$@" ;;
   claim)          cmd_claim "$@" ;;
   start|web)      cmd_web "$@" ;;
   block)          cmd_block "$@" ;;
