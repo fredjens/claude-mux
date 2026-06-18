@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# test_mux.sh — dependency-free bash test suite for ../mux.sh (the "verb layer").
+#
+# Proves the state-machine rules (cmd_release/claim/block/resolve/ok/fail/revert)
+# and the executor's task-selection logic (cmd_next), plus resolve_id + status
+# --json. No bats, no extra deps — just bash + git + awk/sed/grep + python3.
+#
+# Each test runs against a THROWAWAY git repo (mktemp -d), never the real one:
+# mux.sh does `git rev-parse --show-toplevel` and cd's there, so we invoke it
+# from inside a temp repo's CWD via a subshell. The real repo is never touched.
+#
+# Run:  bash mux/tests/test_mux.sh
+# Exits 0 iff every assertion passes; non-zero otherwise.
+
+# NOTE: deliberately NO `set -e` here — we capture non-zero exit codes from
+# mux.sh as data (RC) to assert that illegal transitions are refused.
+
+# --- locate the script under test, ONCE, before any cd --------------------
+TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MUX="$(cd "$TEST_DIR/.." && pwd)/mux.sh"
+[ -f "$MUX" ] || { echo "cannot find mux.sh at $MUX" >&2; exit 2; }
+
+# --- temp-repo bookkeeping + cleanup --------------------------------------
+TMPDIRS=()
+mktmp() { local d; d="$(mktemp -d)"; TMPDIRS+=("$d"); printf '%s\n' "$d"; }
+cleanup() { local d; for d in "${TMPDIRS[@]:-}"; do [ -n "$d" ] && rm -rf "$d"; done; }
+trap cleanup EXIT
+
+# A fresh git repo with one commit so HEAD exists; prints its path.
+setup_repo() {
+  local d; d="$(mktmp)"
+  (
+    cd "$d" || exit 1
+    git init -q
+    git config user.email "test@example.com"
+    git config user.name "Test"
+    echo init > README.md
+    git add README.md
+    git commit -qm init
+  )
+  printf '%s\n' "$d"
+}
+
+# Create a task file directly, in a chosen status (isolates the verb under test).
+# mk_task <dir> <filename> <status> [extra_header_line]
+mk_task() {
+  local d="$1" name="$2" st="$3" extra="${4:-}"
+  mkdir -p "$d/.mux/tasks"
+  {
+    echo "# Task: ${name%.task.md}"
+    echo "# STATUS: $st"
+    [ -n "$extra" ] && echo "$extra"
+    echo "## Goal"
+    echo "goal text"
+    echo "## Details"
+    echo "-"
+  } > "$d/.mux/tasks/$name"
+}
+
+# Read a task file's STATUS (same logic as mux.sh task_status).
+status_of() { grep -m1 -i '^# STATUS:' "$1" | sed 's/.*STATUS:[[:space:]]*//' | awk '{print $1}'; }
+
+# Rewrite a STATUS line in place (for setting up dependency-done fixtures).
+flip_status() {
+  local f="$1" s="$2" t; t="$(mktemp)"
+  awk -v s="$s" '/^# STATUS:/&&!d{print "# STATUS: " s; d=1; next}{print}' "$f" > "$t"
+  mv "$t" "$f"
+}
+
+# Invoke mux.sh inside a temp repo; capture combined output in OUT and code in RC.
+# m <dir> <verb> [args...]
+m() {
+  local d="$1"; shift
+  OUT="$( cd "$d" && bash "$MUX" "$@" 2>&1 )"; RC=$?
+}
+
+# --- assertions -----------------------------------------------------------
+PASS=0; FAIL=0
+ok() { PASS=$((PASS+1)); printf '    \033[32mPASS\033[0m %s\n' "$1"; }
+no() { FAIL=$((FAIL+1)); printf '    \033[31mFAIL\033[0m %s\n' "$1"; }
+
+# assert <desc> <test-expr...>  — evaluates the expression; pass if it succeeds.
+assert() { local desc="$1"; shift; if "$@"; then ok "$desc"; else no "$desc"; fi; }
+assert_eq() { # <desc> <actual> <expected>
+  if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got [$2], want [$3])"; fi; }
+assert_zero() { if [ "$RC" -eq 0 ]; then ok "$1"; else no "$1 (rc=$RC: $OUT)"; fi; }
+assert_nonzero() { if [ "$RC" -ne 0 ]; then ok "$1"; else no "$1 (rc=0, unexpectedly succeeded)"; fi; }
+assert_contains() { # <desc> <haystack> <needle>
+  case "$2" in *"$3"*) ok "$1";; *) no "$1 (missing [$3] in: $2)";; esac; }
+assert_file_contains() { if grep -q "$2" "$3" 2>/dev/null; then ok "$1"; else no "$1 (no [$2] in $3)"; fi; }
+assert_status() { assert_eq "$1" "$(status_of "$3")" "$2"; }  # <desc> <want> <file>
+
+header() { printf '\n\033[1m▶ %s\033[0m\n' "$1"; }
+
+# ==========================================================================
+# 1. add creates a DRAFT task with slug, STATUS line, and goal text.
+# ==========================================================================
+test_add() {
+  header "add creates a DRAFT task"
+  local d; d="$(setup_repo)"
+  m "$d" add myslug "ship the widget"
+  assert_zero "add exits 0"
+  local f; f="$(ls "$d"/.mux/tasks/*myslug*.task.md 2>/dev/null)"
+  assert "task file was created" test -f "$f"
+  assert_file_contains "STATUS is DRAFT" '^# STATUS: DRAFT' "$f"
+  assert_file_contains "contains the slug" 'myslug' "$f"
+  assert_file_contains "contains the goal text" 'ship the widget' "$f"
+}
+
+# ==========================================================================
+# 2. Happy path: add -> release (DRAFT->READY) -> claim (READY->RUNNING).
+# ==========================================================================
+test_happy_path() {
+  header "happy path add -> release -> claim"
+  local d; d="$(setup_repo)"
+  m "$d" add happy "do the thing"
+  local f; f="$(ls "$d"/.mux/tasks/*happy*.task.md)"
+  assert_status "after add: DRAFT" DRAFT "$f"
+  m "$d" release happy
+  assert_zero "release exits 0"
+  assert_status "after release: READY" READY "$f"
+  m "$d" claim happy
+  assert_zero "claim exits 0 (only .mux is dirty)"
+  assert_status "after claim: RUNNING" RUNNING "$f"
+}
+
+# ==========================================================================
+# 3. Illegal transitions are refused with non-zero exit.
+# ==========================================================================
+test_illegal_transitions() {
+  header "illegal transitions are refused"
+  local d; d="$(setup_repo)"
+
+  mk_task "$d" "20200101-000000-rel.task.md" READY
+  m "$d" release rel
+  assert_nonzero "release on a non-DRAFT task is refused"
+
+  mk_task "$d" "20200101-000000-clm.task.md" DRAFT
+  m "$d" claim clm
+  assert_nonzero "claim on a non-READY task is refused"
+
+  local e; e="$(setup_repo)"
+  m "$e" ok
+  assert_nonzero "ok with no RUNNING task is refused"
+  m "$e" revert
+  assert_nonzero "revert with no RUNNING task is refused"
+
+  mk_task "$d" "20200101-000000-res.task.md" READY
+  m "$d" resolve res "an answer"
+  assert_nonzero "resolve on a non-BLOCKED task is refused"
+}
+
+# ==========================================================================
+# 4. claim refuses a dirty non-.mux tree, succeeds when only .mux is dirty.
+# ==========================================================================
+test_claim_clean_check() {
+  header "claim honors git_clean (ignores .mux)"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-dirty.task.md" READY
+  echo "stray" > "$d/src.txt"          # untracked non-.mux change
+  m "$d" claim dirty
+  assert_nonzero "claim refuses a dirty working tree (non-.mux change present)"
+  assert_status "task stays READY after refused claim" READY "$d/.mux/tasks/20200101-000000-dirty.task.md"
+  rm -f "$d/src.txt"                    # now only .mux is dirty
+  m "$d" claim dirty
+  assert_zero "claim succeeds when only .mux paths are dirty"
+  assert_status "task is RUNNING after successful claim" RUNNING "$d/.mux/tasks/20200101-000000-dirty.task.md"
+}
+
+# ==========================================================================
+# 5. block appends ## Question; resolve appends ## Answer (when answer given).
+# ==========================================================================
+test_block_resolve() {
+  header "block appends Question, resolve appends Answer"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-bq.task.md"
+  mk_task "$d" "20200101-000000-bq.task.md" RUNNING
+  m "$d" block bq "which database should I use?"
+  assert_zero "block exits 0"
+  assert_status "block: RUNNING -> BLOCKED" BLOCKED "$f"
+  assert_file_contains "block appended a ## Question block" '^## Question' "$f"
+  assert_file_contains "question text is recorded" 'which database' "$f"
+  m "$d" resolve bq "use sqlite"
+  assert_zero "resolve exits 0"
+  assert_status "resolve: BLOCKED -> READY" READY "$f"
+  assert_file_contains "resolve appended a ## Answer block" '^## Answer' "$f"
+  assert_file_contains "answer text is recorded" 'use sqlite' "$f"
+}
+
+# ==========================================================================
+# 6. ok commits exactly one commit on the current branch, marks DONE, appends
+#    a # Done: line, excludes .mux from the commit. ok with no changes refused.
+# ==========================================================================
+test_ok_commit() {
+  header "ok commits one commit (excluding .mux) and marks DONE"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-okc.task.md"
+  mk_task "$d" "20200101-000000-okc.task.md" RUNNING
+  echo "feature code" > "$d/app.txt"             # real (non-.mux) file change
+
+  local before after files
+  before="$(cd "$d" && git rev-list --count HEAD)"
+  m "$d" ok "looks good"
+  assert_zero "ok exits 0 when there are real file changes"
+  after="$(cd "$d" && git rev-list --count HEAD)"
+  assert_eq "exactly one new commit was created" "$after" "$((before+1))"
+  assert_status "task is DONE after ok" DONE "$f"
+  assert_file_contains "a # Done: line was appended" '^# Done:' "$f"
+
+  files="$(cd "$d" && git show --name-only --pretty=format: HEAD)"
+  assert_contains "the commit includes the real file" "$files" "app.txt"
+  if printf '%s\n' "$files" | grep -q '\.mux'; then
+    no ".mux was excluded from the commit"
+  else
+    ok ".mux was excluded from the commit"
+  fi
+
+  # ok with no file changes (only .mux dirty) must be refused.
+  local e; e="$(setup_repo)"
+  mk_task "$e" "20200101-000000-noc.task.md" RUNNING
+  m "$e" ok
+  assert_nonzero "ok with no real file changes is refused"
+  assert_contains "refusal mentions no file changes" "$OUT" "no file changes"
+}
+
+# ==========================================================================
+# 7. revert/fail on a RUNNING task discard working-tree changes -> FAILED.
+# ==========================================================================
+test_revert_fail_discard() {
+  header "revert/fail discard changes and mark FAILED"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-flr.task.md"
+  mk_task "$d" "20200101-000000-flr.task.md" RUNNING
+  echo "wip" > "$d/wip.txt"
+  m "$d" fail flr "premise was wrong"
+  assert_zero "fail exits 0"
+  assert_status "fail: RUNNING -> FAILED" FAILED "$f"
+  assert "fail discarded the created source file" test ! -e "$d/wip.txt"
+  assert_file_contains "fail recorded a reason" 'premise was wrong' "$f"
+
+  local e; e="$(setup_repo)"
+  local g="$e/.mux/tasks/20200101-000000-rvt.task.md"
+  mk_task "$e" "20200101-000000-rvt.task.md" RUNNING
+  echo "wip2" > "$e/wip2.txt"
+  m "$e" revert
+  assert_zero "revert exits 0"
+  assert_status "revert: RUNNING -> FAILED" FAILED "$g"
+  assert "revert discarded the created source file" test ! -e "$e/wip2.txt"
+}
+
+# ==========================================================================
+# 8. cmd_next selection logic.
+# ==========================================================================
+test_next_dirty() {
+  header "next prints nothing when the tree is dirty"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-rdy.task.md" READY
+  echo "uncommitted" > "$d/pending.txt"     # work awaiting `mux ok`
+  m "$d" next
+  assert_zero "next exits 0 even when dirty"
+  assert_eq "next prints nothing while tree is dirty" "$OUT" ""
+}
+
+test_next_running_wins() {
+  header "next: a RUNNING task wins over READY"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-aaa-ready.task.md" READY     # earlier filename
+  mk_task "$d" "20200102-000000-bbb-running.task.md" RUNNING # later, but RUNNING
+  m "$d" next
+  assert_eq "next selects the RUNNING task" "$OUT" "20200102-000000-bbb-running.task.md"
+}
+
+test_next_fifo() {
+  header "next: FIFO-oldest READY task is chosen"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200102-000000-second.task.md" READY
+  mk_task "$d" "20200101-000000-first.task.md" READY        # earlier -> should win
+  m "$d" next
+  assert_eq "next selects the oldest READY by filename" "$OUT" "20200101-000000-first.task.md"
+}
+
+test_next_depends_on() {
+  header "next: a READY task is gated by # Depends-on: until the dep is DONE"
+  local d; d="$(setup_repo)"
+  local dep="20200101-000000-dep-a.task.md"
+  mk_task "$d" "$dep" DRAFT                                   # dependency, NOT done
+  mk_task "$d" "20200102-000000-dep-b.task.md" READY "# Depends-on: $dep"
+  m "$d" next
+  assert_eq "dependent task is skipped while dep is not DONE" "$OUT" ""
+  flip_status "$d/.mux/tasks/$dep" DONE
+  m "$d" next
+  assert_eq "dependent task becomes selectable once dep is DONE" "$OUT" "20200102-000000-dep-b.task.md"
+}
+
+# ==========================================================================
+# 9. status --json emits valid JSON with the expected fields.
+# ==========================================================================
+test_status_json() {
+  header "status --json emits valid JSON with expected fields"
+  command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
+  local d; d="$(setup_repo)"
+  local dep="20200101-000000-jdep.task.md"
+  mk_task "$d" "$dep" DONE
+  mk_task "$d" "20200102-000000-jrun.task.md" RUNNING
+  mk_task "$d" "20200103-000000-jrdy.task.md" READY "# Depends-on: $dep"
+  m "$d" status --json
+  assert_zero "status --json exits 0"
+  if printf '%s' "$OUT" | python3 -m json.tool >/dev/null 2>&1; then
+    ok "status --json output is valid JSON"
+  else
+    no "status --json output is valid JSON (got: $OUT)"
+  fi
+  assert_contains "JSON has a status field"     "$OUT" '"status"'
+  assert_contains "JSON has a current field"    "$OUT" '"current"'
+  assert_contains "JSON has a next field"       "$OUT" '"next"'
+  assert_contains "JSON has a depends_on field" "$OUT" '"depends_on"'
+}
+
+# ==========================================================================
+# 10. resolve_id: unique substring resolves; ambiguous substring errors.
+# ==========================================================================
+test_resolve_id() {
+  header "resolve_id resolves a unique substring, errors on an ambiguous one"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-lonelyxyz.task.md" DRAFT
+  mk_task "$d" "20200102-000000-dupone.task.md" DRAFT
+  mk_task "$d" "20200103-000000-duptwo.task.md" DRAFT
+  m "$d" show lonelyxyz
+  assert_zero "show resolves a unique substring"
+  m "$d" show dup
+  assert_nonzero "show errors on an ambiguous substring"
+  assert_contains "ambiguity is reported" "$OUT" "ambiguous"
+}
+
+# --- run -------------------------------------------------------------------
+test_add
+test_happy_path
+test_illegal_transitions
+test_claim_clean_check
+test_block_resolve
+test_ok_commit
+test_revert_fail_discard
+test_next_dirty
+test_next_running_wins
+test_next_fifo
+test_next_depends_on
+test_status_json
+test_resolve_id
+
+printf '\n\033[1m──────────────────────────────────────────\033[0m\n'
+printf '\033[1mTotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ] || exit 1
+echo "All tests passed."
+exit 0
