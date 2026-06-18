@@ -71,6 +71,20 @@ def idle_reason():
     return "No activity"
 
 
+def status():
+    """Live executor state for the page's working indicator.
+    executing = a tick is in flight (.mux/tick.lock exists); elapsed = seconds
+    since the lock dir was created (its mtime), or None if unreadable/idle."""
+    lock = os.path.join(REPO, ".mux", "tick.lock")
+    if not os.path.isdir(lock):
+        return {"executing": False, "elapsed": None}
+    try:
+        elapsed = int(time.time() - os.path.getmtime(lock))
+    except OSError:
+        elapsed = None
+    return {"executing": True, "elapsed": elapsed}
+
+
 def tool_line(blk):
     """A readable one-liner for a tool_use event: what it's actually doing."""
     name = blk.get("name", "tool")
@@ -209,6 +223,10 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#0c0f13;border-radius:6px;color:#9fb0c0;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+ #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
+ #working:empty{margin:0}
+ #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
+ @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
  #log .l{padding:1px 0} .la{color:#e6edf3} .lt{color:#56b6c2} .lr{color:#5bb574} .ls{color:#3f4855;margin:8px 0} .lx{color:#9aa7b4}
 </style>
@@ -216,11 +234,28 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <button onclick="planner()">+ planner</button></header>
 <main>
  <section><h2>Tasks</h2><div id=tasks></div></section>
- <section><h2>Executor</h2><pre id=log></pre></section>
+ <section><h2>Executor</h2><div id=working></div><pre id=log></pre></section>
 </main>
 <script>
 const E=(s)=>document.getElementById(s)
 const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
+// Working indicator: server says executing/elapsed (polled in refresh); the
+// counter is driven client-side from a start time so it ticks every second
+// without hammering the server. work.start=null means no cycle in flight.
+let work={start:null,known:false}
+function drawWork(){const w=E("working");if(!w)return
+ if(work.start===null){w.innerHTML="";return}
+ const secs=work.known?Math.max(0,Math.floor((Date.now()-work.start)/1000)):null
+ w.innerHTML='<span class=glyph>✳</span><span class=shimmer>Working…'+(secs===null?"":" "+secs+"s")+'</span>'}
+async function pollStatus(){try{const s=await (await fetch("/api/status")).json()
+  if(!s.executing){work.start=null;work.known=false}
+  else{const base=Date.now()-(s.elapsed||0)*1000
+   // Re-sync start only on a new cycle or first sight, so the local counter
+   // stays smooth instead of jumping each poll.
+   if(work.start===null||Math.abs(base-work.start)>3000)work.start=base
+   work.known=s.elapsed!=null}}
+ catch(e){}
+ drawWork()}
 async function act(verb,id,prompt){let text=""
  if(prompt){text=window.prompt(prompt);if(text===null)return}
  try{const r=await fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
@@ -248,9 +283,10 @@ async function refresh(){
   `<div class=nm onclick="window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open>↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
  const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")}
+ E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
+ pollStatus()}
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
-refresh();setInterval(refresh,2000)
+refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
 </script>"""
 
 
@@ -279,6 +315,8 @@ class H(BaseHTTPRequestHandler):
             self._send(200, json.dumps(log_lines()))
         elif self.path == "/api/repo":
             self._send(200, json.dumps({"repo": REPO}))
+        elif self.path == "/api/status":
+            self._send(200, json.dumps(status()))
         elif self.path.startswith("/plan?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, plan_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
