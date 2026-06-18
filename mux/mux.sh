@@ -64,6 +64,10 @@ mkdir -p .mux/tasks
 shopt -s nullglob
 
 TASKS=.mux/tasks
+# Append-only ledger of approved (committed, then deleted) task filenames, so a
+# `# Depends-on:` pointing at a deleted task still resolves. Lives under .mux,
+# so it's never committed (cmd_ok does `git reset -q -- .mux`).
+DONE_LOG=.mux/done.log
 
 # --- helpers ---------------------------------------------------------------
 
@@ -97,6 +101,15 @@ json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # Is the RUNNING task approved? / dependency of a task and its done-state.
 task_dep()   { grep -m1 -i '^# Depends-on:' "$1" | sed 's/.*Depends-on:[[:space:]]*//' | awk '{print $1}' || true; }
 
+# Is a dependency satisfied? $1 = the dependency's task filename. Approved tasks
+# are DELETED (their file is gone), so the real check is the done.log ledger; the
+# first clause is belt-and-suspenders for a lingering DONE file.
+dep_is_done() {
+  [ -f "$TASKS/$1" ] && [ "$(task_status "$TASKS/$1")" = DONE ] && return 0
+  [ -f "$DONE_LOG" ] && grep -qxF -- "$1" <(cut -f1 "$DONE_LOG") && return 0
+  return 1
+}
+
 # True when the working tree has no uncommitted changes — IGNORING mux's own
 # .mux/ queue (it's metadata, never "work"), whether or not it's gitignored.
 git_clean() {
@@ -111,11 +124,25 @@ git_clean() {
 }
 
 # Build a titled commit message from a task file (+ optional approval note).
+# The subject is `slug: <first Goal line>`; the body carries the REST of the
+# Goal block (a short summary of the plan, stopping at the next ## heading),
+# then `task: <filename>`, then the optional approve note. Goal is meant to be
+# short, so this stays tidy — Details is never included.
 commit_message() {
-  local f="$1" note="${2:-}" slug goal
+  local f="$1" note="${2:-}" slug goal_first goal_rest
   slug="$(grep -m1 -i '^# Task:' "$f" | sed 's/^# *[Tt]ask:[[:space:]]*//')"
-  goal="$(awk '/^## *Goal/{g=1;next} g&&NF{print;exit}' "$f")"
-  printf '%s: %s\n\ntask: %s' "${slug:-task}" "${goal:-see task file}" "${f##*/}"
+  # The Goal block: every line between "## Goal" and the next "##" heading,
+  # dropping leading/trailing blank lines. The first such line is the subject;
+  # the rest is the body summary. Details is deliberately never included.
+  goal_first="$(awk '/^## *Goal/{g=1;next} /^##/{g=0} g&&NF{print;exit}' "$f")"
+  goal_rest="$(awk '
+    /^## *Goal/{g=1;next} /^##/{g=0; next}
+    g{ if(!seen){ if(NF){seen=1}; next } if(NF){last=NR} lines[NR]=$0 }
+    END{ for(i=1;i<=last;i++) if(i in lines) print lines[i] }
+  ' "$f")"
+  printf '%s: %s\n' "${slug:-task}" "${goal_first:-see task file}"
+  [ -n "$goal_rest" ] && printf '\n%s\n' "$goal_rest"
+  printf '\ntask: %s' "${f##*/}"
   [ -n "$note" ] && printf '\n\n%s' "$note"
   return 0
 }
@@ -124,7 +151,7 @@ commit_message() {
 resolve_id() {
   local q="${1%.task.md}"                       # tolerate a full filename
   local matches=( "$TASKS"/*"$q"*.task.md )
-  [ ${#matches[@]} -gt 0 ] || die "no task matches '$1'"
+  [ ${#matches[@]} -gt 0 ] || die "no task matches '$1' — if it was approved, its file is gone; try: git log --grep $q"
   if [ ${#matches[@]} -gt 1 ]; then
     { echo "✗ '$q' is ambiguous — matches:"; printf '   %s\n' "${matches[@]##*/}"; } >&2
     exit 1
@@ -259,9 +286,12 @@ cmd_ok() {
   git reset -q -- .mux 2>/dev/null || true
   git commit -q -m "$(commit_message "$f" "$*")" || die "git commit failed"
   local sha br; sha="$(git rev-parse --short HEAD)"; br="$(git branch --show-current 2>/dev/null || echo '?')"
-  set_status "$f" DONE
-  append_block "$f" "# Done: $(stamp) · $sha on $br"
-  echo "✓ ${f##*/} → DONE   ($sha on $br)"
+  # The commit is now the permanent record. Note it in the done.log ledger (so a
+  # `# Depends-on:` on this task still resolves once its file is gone), then
+  # delete the task file — .mux/tasks/ only ever holds live, not-yet-done work.
+  printf '%s\t%s\t%s\n' "${f##*/}" "$sha" "$(stamp)" >> "$DONE_LOG"
+  rm -f "$f"
+  echo "✓ ${f##*/} committed ($sha on $br) — task file removed"
 }
 
 cmd_changes() {
@@ -302,7 +332,7 @@ cmd_status() {
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
       depstatus=pending
-      [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ] && depstatus=done
+      dep_is_done "$dep" && depstatus=done
       note="$note (depends: ${dep%%.task.md} [$depstatus])"
     fi
     printf '%s %-7s %s%s\n' "$marker" "$status" "${f##*/}" "$note"
@@ -333,7 +363,7 @@ cmd_status_json() {
     awaiting=false; [ "$status" = BLOCKED ] && awaiting=true
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
-      if [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ]; then depstatus='"done"'; else depstatus='"pending"'; fi
+      if dep_is_done "$dep"; then depstatus='"done"'; else depstatus='"pending"'; fi
       dep="\"$(json_escape "$dep")\""
     else
       dep=null; depstatus=null
@@ -367,7 +397,7 @@ cmd_next() {
     [ "$(task_status "$f")" = READY ] || continue
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
-      [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ] || continue
+      dep_is_done "$dep" || continue
     fi
     printf '%s\n' "${f##*/}"; return 0
   done

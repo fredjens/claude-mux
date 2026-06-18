@@ -188,11 +188,12 @@ test_block_resolve() {
 }
 
 # ==========================================================================
-# 6. ok commits exactly one commit on the current branch, marks DONE, appends
-#    a # Done: line, excludes .mux from the commit. ok with no changes refused.
+# 6. ok commits exactly one commit on the current branch, DELETES the task file
+#    (the commit is the record), excludes .mux from the commit. ok with no
+#    changes refused.
 # ==========================================================================
 test_ok_commit() {
-  header "ok commits one commit (excluding .mux) and marks DONE"
+  header "ok commits one commit (excluding .mux) and removes the task file"
   local d; d="$(setup_repo)"
   local f="$d/.mux/tasks/20200101-000000-okc.task.md"
   mk_task "$d" "20200101-000000-okc.task.md" RUNNING
@@ -204,8 +205,8 @@ test_ok_commit() {
   assert_zero "ok exits 0 when there are real file changes"
   after="$(cd "$d" && git rev-list --count HEAD)"
   assert_eq "exactly one new commit was created" "$after" "$((before+1))"
-  assert_status "task is DONE after ok" DONE "$f"
-  assert_file_contains "a # Done: line was appended" '^# Done:' "$f"
+  assert "task file is removed after ok" test ! -e "$f"
+  assert_contains "ok reports the file was removed" "$OUT" "task file removed"
 
   files="$(cd "$d" && git show --name-only --pretty=format: HEAD)"
   assert_contains "the commit includes the real file" "$files" "app.txt"
@@ -221,6 +222,70 @@ test_ok_commit() {
   m "$e" ok
   assert_nonzero "ok with no real file changes is refused"
   assert_contains "refusal mentions no file changes" "$OUT" "no file changes"
+}
+
+# ==========================================================================
+# 6b. ok writes the full Goal block into the commit body (more than one line),
+#     and the approved task no longer appears on the board (status --json).
+# ==========================================================================
+test_ok_commit_summary_and_board() {
+  header "ok puts the whole Goal in the commit body and drops the task from the board"
+  command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-sum.task.md"
+  mkdir -p "$d/.mux/tasks"
+  {
+    echo "# Task: sum"
+    echo "# STATUS: RUNNING"
+    echo "## Goal"
+    echo "first goal line is the subject"
+    echo "second goal line in the body"
+    echo "third goal line in the body"
+    echo "## Details"
+    echo "details should NOT appear in the commit"
+  } > "$f"
+  echo "feature code" > "$d/app.txt"
+
+  m "$d" ok
+  assert_zero "ok exits 0"
+  local body; body="$(cd "$d" && git log -1 --pretty=%B)"
+  assert_contains "subject carries the slug + first Goal line" "$body" "sum: first goal line is the subject"
+  assert_contains "body carries the second Goal line"          "$body" "second goal line in the body"
+  assert_contains "body carries the third Goal line"           "$body" "third goal line in the body"
+  assert_contains "body names the task file"                   "$body" "task: 20200101-000000-sum.task.md"
+  case "$body" in *"details should NOT appear"*) no "Details leaked into the commit body";; *) ok "Details excluded from the commit body";; esac
+
+  m "$d" status --json
+  assert_zero "status --json exits 0 after the task is approved"
+  case "$OUT" in *"20200101-000000-sum.task.md"*) no "approved task still listed on the board";; *) ok "approved task no longer listed on the board";; esac
+}
+
+# ==========================================================================
+# 6c. A READY task that Depends-on an already-approved (deleted) task is still
+#     pickable: status --json reports its dep done and mux next chooses it.
+# ==========================================================================
+test_depends_on_deleted_dep() {
+  header "a dep that was approved (deleted) still resolves via done.log"
+  command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
+  local d; d="$(setup_repo)"
+  local dep="20200101-000000-depdel.task.md"
+  # Approve the dependency so its file is deleted and it's recorded in done.log.
+  mk_task "$d" "$dep" RUNNING
+  echo "dep code" > "$d/dep.txt"
+  m "$d" ok
+  assert_zero "approving the dependency exits 0"
+  assert "dependency file was deleted" test ! -e "$d/.mux/tasks/$dep"
+  assert_file_contains "done.log records the deleted dependency" "$dep" "$d/.mux/done.log"
+
+  # A dependent task pointing at the now-deleted dep must read as satisfied.
+  mk_task "$d" "20200102-000000-depdent.task.md" READY "# Depends-on: $dep"
+  m "$d" status --json
+  assert_zero "status --json exits 0"
+  assert_contains "dependent's dep_status is done (not pending)" "$OUT" '"dep_status":"done"'
+  case "$OUT" in *'"dep_status":"pending"'*) no "dep still reads pending after deletion";; *) ok "no pending dep_status remains";; esac
+
+  m "$d" next
+  assert_eq "next chooses the dependent now its dep is satisfied" "$OUT" "20200102-000000-depdent.task.md"
 }
 
 # ==========================================================================
@@ -433,6 +498,8 @@ test_illegal_transitions
 test_claim_clean_check
 test_block_resolve
 test_ok_commit
+test_ok_commit_summary_and_board
+test_depends_on_deleted_dep
 test_revert_fail_discard
 test_next_dirty
 test_next_running_wins
