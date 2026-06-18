@@ -32,6 +32,14 @@
 #   mux help
 #
 # <id> is any unique substring of a task's filename (usually its slug).
+#
+# Recovery — a tick killed mid-cycle (e.g. `mux stop` while it was working):
+#   its RUNNING task is flagged "(interrupted — revert & re-release)" in
+#   `mux status` because the working tree holds PARTIAL, half-finished edits.
+#   Do NOT `mux ok` it (that would commit incomplete work). Instead:
+#     mux revert            discard the partial edits → FAILED, clean tree again
+#   then re-release it to run fresh: re-add the task (`mux add` + `mux release`)
+#   so the executor retries it from scratch — never `mux ok` an interrupted task.
 
 set -euo pipefail
 
@@ -133,6 +141,20 @@ running_task() {
   [ "$n" -gt 0 ] || die "no task is RUNNING — nothing to approve or revise"
   [ "$n" -eq 1 ] || die "more than one task is RUNNING (invariant broken); fix the queue by hand"
   printf '%s\n' "$found"
+}
+
+# Annotate the single RUNNING task as interrupted mid-tick (called only when a
+# live tick is actually killed). Like running_task but QUIET: a stop with no
+# RUNNING task — or, defensively, more than one — is normal here, so do nothing
+# and never die. The marker is an annotation; STATUS stays RUNNING (the
+# work-in-tree invariant is unchanged). Idempotent — never doubles the line.
+mark_interrupted() {
+  local f found="" n=0
+  for f in "$TASKS"/*.task.md; do
+    if [ "$(task_status "$f")" = RUNNING ]; then found="$f"; n=$((n+1)); fi
+  done
+  [ "$n" -eq 1 ] || return 0
+  grep -qi '^# Interrupted:' "$found" || append_block "$found" "# Interrupted: $(stamp)"
 }
 
 # Refuse an illegal transition with a clear message.
@@ -262,6 +284,9 @@ cmd_status() {
   printf '%-3s %-7s %s\n' "" "STATUS" "TASK"
   printf '%-3s %-7s %s\n' "" "------" "----"
   local f status marker dep depstatus note next_marked=0
+  # The interrupted marker is only LIVE while the tree is dirty (a resumed,
+  # finished task has a clean tree, so the stale annotation is ignored).
+  local dirty=false; git_clean || dirty=true
   for f in "${tasks[@]}"; do          # filename sort == FIFO
     status="$(task_status "$f")"
     marker="   "
@@ -269,7 +294,10 @@ cmd_status() {
     elif [ "$status" = READY ] && [ "$next_marked" -eq 0 ]; then marker=" > "; next_marked=1
     fi
     note=""
-    grep -qi '^## Approved' "$f" && note=" (approved)"
+    if [ "$status" = RUNNING ] && [ "$dirty" = true ] && grep -qi '^# Interrupted:' "$f"; then
+      note=" (interrupted — revert & re-release)"
+    fi
+    grep -qi '^## Approved' "$f" && note="$note (approved)"
     [ "$status" = BLOCKED ] && note=" (awaiting answer)"
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
@@ -288,8 +316,10 @@ cmd_status() {
 cmd_status_json() {
   local tasks=( "$TASKS"/*.task.md )
   [ ${#tasks[@]} -gt 0 ] || { printf '[]\n'; return 0; }
-  local f status dep depstatus approved awaiting current next exec_now next_marked=0 sep=""
+  local f status dep depstatus approved awaiting current next exec_now interrupted next_marked=0 sep=""
   local executing=false; [ -d .mux/tick.lock ] && executing=true
+  # Interrupted is live only while the tree is dirty (see cmd_status).
+  local dirty=false; git_clean || dirty=true
   printf '['
   for f in "${tasks[@]}"; do
     status="$(task_status "$f")"
@@ -298,6 +328,7 @@ cmd_status_json() {
     elif [ "$status" = READY ] && [ "$next_marked" -eq 0 ]; then next=true; next_marked=1
     fi
     exec_now=false; [ "$status" = RUNNING ] && [ "$executing" = true ] && exec_now=true
+    interrupted=false; [ "$status" = RUNNING ] && [ "$dirty" = true ] && grep -qi '^# Interrupted:' "$f" && interrupted=true
     approved=false; grep -qi '^## Approved' "$f" && approved=true
     awaiting=false; [ "$status" = BLOCKED ] && awaiting=true
     dep="$(task_dep "$f")"
@@ -307,8 +338,8 @@ cmd_status_json() {
     else
       dep=null; depstatus=null
     fi
-    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s}' \
-      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$approved" "$awaiting" "$dep" "$depstatus"
+    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s}' \
+      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus"
     sep=","
   done
   printf ']\n'
@@ -447,6 +478,9 @@ kill_tick() {
       [ "$i" -ge 30 ] && break                                 # give up after ~3s
       sleep 0.1
     done
+    # The tick was LIVE — its RUNNING task holds PARTIAL, half-finished edits.
+    # Flag it so it can't be mistaken for finished work awaiting `mux ok`.
+    mark_interrupted
   fi
   # Only now that the tick's claude is gone do we drop its pid + the lock.
   rm -f .mux/run/tick.pid

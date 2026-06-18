@@ -376,6 +376,56 @@ STUB
   wait "$tickrun" 2>/dev/null
 }
 
+# ==========================================================================
+# 12. A tick killed mid-cycle flags its RUNNING task as interrupted, so it
+#     can't be mistaken for finished work awaiting `mux ok`. The marker is
+#     appended during teardown (kill_tick), kept while STATUS stays RUNNING,
+#     and `status --json` reports interrupted:true while the tree is dirty.
+# ==========================================================================
+test_interrupted_marker() {
+  header "a killed tick flags its RUNNING task interrupted"
+  command -v ps >/dev/null 2>&1 || { no "ps not available to test interrupted teardown"; return; }
+  command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-irq.task.md"
+  mk_task "$d" "20200101-000000-irq.task.md" RUNNING
+  echo "half-finished edit" > "$d/partial.txt"   # PARTIAL work in the tree
+
+  # Stub claude that blocks so the tick holds the lock until we stop it.
+  local bin="$d/bin"; mkdir -p "$bin"
+  cat > "$bin/claude" <<'STUB'
+#!/usr/bin/env bash
+i=0; while [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+STUB
+  chmod +x "$bin/claude"
+
+  ( cd "$d" && PATH="$bin:$PATH" bash "$MUX" tick ) >/dev/null 2>&1 &
+  local tickrun=$!
+  local pid="" i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$d/.mux/run/tick.pid" ]; then pid="$(cat "$d/.mux/run/tick.pid")"; [ -n "$pid" ] && break; fi
+    sleep 0.1; i=$((i+1))
+  done
+  assert "tick recorded its claude pid" test -n "$pid"
+
+  # Stop mid-tick: kill_tick marks the RUNNING task interrupted as it tears down.
+  ( cd "$d" && PATH="$bin:$PATH" bash "$MUX" stop ) >/dev/null 2>&1
+  i=0; while [ "$i" -lt 50 ] && ps -p "$pid" >/dev/null 2>&1; do sleep 0.1; i=$((i+1)); done
+
+  assert_status "interrupted task stays RUNNING (marker is an annotation)" RUNNING "$f"
+  assert_file_contains "an # Interrupted: line was appended" '^# Interrupted:' "$f"
+
+  m "$d" status
+  assert_contains "status flags it interrupted" "$OUT" "interrupted — revert & re-release"
+
+  m "$d" status --json
+  assert_zero "status --json exits 0"
+  assert_contains "JSON has an interrupted field" "$OUT" '"interrupted"'
+  assert_contains "JSON reports interrupted:true while the tree is dirty" "$OUT" '"interrupted":true'
+
+  wait "$tickrun" 2>/dev/null
+}
+
 # --- run -------------------------------------------------------------------
 test_add
 test_happy_path
@@ -391,6 +441,7 @@ test_next_depends_on
 test_status_json
 test_resolve_id
 test_stop_kills_tick
+test_interrupted_marker
 
 printf '\n\033[1m──────────────────────────────────────────\033[0m\n'
 printf '\033[1mTotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
