@@ -19,6 +19,20 @@ MUX  = os.environ.get("MUX_BIN", "mux")
 PORT = int(os.environ.get("MUX_PORT", "8770"))   # not 7000: macOS AirPlay uses it
 WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendored marked + theme
 
+# Provider→theme map: the UI accent + header label come from ONE place here, so
+# re-skinning for a different executor backend = changing/adding one entry and
+# setting MUX_PROVIDER. Unknown providers fall back to the neutral "generic".
+THEMES = {
+    "claude": {"accent": "#d97757", "label": "Claude"},
+    "openai": {"accent": "#10a37f", "label": "OpenAI"},
+    "gemini": {"accent": "#4285f4", "label": "Gemini"},
+    "generic": {"accent": "#8a8072", "label": "Executor"},
+}
+
+def theme():
+    """The active provider's theme (accent + label), from MUX_PROVIDER."""
+    return THEMES.get(os.environ.get("MUX_PROVIDER", "claude"), THEMES["generic"])
+
 
 def mux(*args):
     """Run a mux verb in the repo; return (ok, combined_output)."""
@@ -257,6 +271,7 @@ def _md_page(title, meta_chips_html, body_md):
     plain text, `meta_chips_html` is trusted inline HTML, `body_md` is markdown."""
     hjs = json.dumps(f'<div class=title>{escape(title)}</div><div class=meta>{meta_chips_html}</div>').replace("</", "<\\/")
     bjs = json.dumps(body_md).replace("</", "<\\/")
+    acc = theme()["accent"]   # link color follows the active provider accent
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <script src="/web/marked.min.js"></script>
 <style>body{{margin:0;background:#1a1815;color:#dcd6ca}}
@@ -285,8 +300,8 @@ def _md_page(title, meta_chips_html, body_md):
   border-radius:50%;background:#6e6555}}
  .md ol{{padding-left:1.6em}}
  .md li::marker{{color:#807767}}
- .md a{{color:#d97757;text-decoration:none;border-bottom:1px solid #5c3e30}}
- .md a:hover{{border-bottom-color:#d97757}}
+ .md a{{color:{acc};text-decoration:none;border-bottom:1px solid #5c3e30}}
+ .md a:hover{{border-bottom-color:{acc}}}
  .md strong{{color:#f3eee4;font-weight:600}}
  .md em{{color:#e6e0d4}}
  .md code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:#211d18;
@@ -388,19 +403,20 @@ def spawn_resume(sid):
 
 PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 <style>
+ :root{--accent:__ACCENT__}
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
  header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
  header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
-  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:#d97757;color:#e3ddd1}
- #counts{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
+  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
+ #counts,#provider{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
  main{display:grid;grid-template-columns:2fr 3fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
  section{background:#1a1815;overflow:auto;padding:12px 16px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
- .RUNNING{color:#d97757}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
+ .RUNNING{color:var(--accent)}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
  .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
  button.danger{color:#8a8072} button.danger:hover{border-color:#c5836b;color:#c5836b}
- #autobtn.on{border-color:#d97757;color:#d97757}
- .run{display:inline-flex;align-items:center;gap:8px;color:#d97757;font-size:12px}
+ #autobtn.on{border-color:var(--accent);color:var(--accent)}
+ .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
  .shimmer{background:linear-gradient(90deg,#6b5f50 0%,#b09a82 20%,#e8a888 50%,#b09a82 80%,#6b5f50 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
@@ -409,7 +425,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #summarybar .slink{cursor:pointer;font-size:12px;color:#8a8072}
  #summarybar .slink:hover{color:#e3ddd1}
  #nowrunning:empty{display:none}
- #nowrunning .pill{display:inline-block;cursor:pointer;font-size:12px;color:#d97757;margin:0 0 10px}
+ #nowrunning .pill{display:inline-block;cursor:pointer;font-size:12px;color:var(--accent);margin:0 0 10px}
  #nowrunning .pill:hover{color:#e3ddd1}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
@@ -424,10 +440,10 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  body.drawer-open #drawer{transform:translateX(0)}
  #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#0c0f13}
  #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#d6dde6;border-radius:6px;padding:1px 9px;line-height:1.4}
- #drawer .dclose:hover{border-color:#d97757}
+ #drawer .dclose:hover{border-color:var(--accent)}
  #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
 </style>
-<header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span><span id=counts></span>
+<header><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span><span id=counts></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button onclick="planner()">+ planner</button></header>
 <main>
@@ -534,7 +550,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
-            self._send(200, PAGE, "text/html; charset=utf-8")
+            t = theme()
+            page = PAGE.replace("__ACCENT__", t["accent"]).replace("__PROVIDER__", escape(t["label"]))
+            self._send(200, page, "text/html; charset=utf-8")
         elif self.path == "/api/tasks":
             if auto_enabled():
                 autopilot()          # release-all then (if safe) ok, BEFORE the board
