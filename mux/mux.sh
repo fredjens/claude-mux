@@ -559,8 +559,11 @@ cmd_web() {
   # in-flight tick (kill_tick drops tick.pid + the lock once its claude is gone),
   # then sweep the remaining pid files. kill_tick MUST run before the *.pid rm,
   # or the rm would delete tick.pid out from under it.
-  trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM
-  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C stops UI + executor; or run: mux stop)"
+  # HUP is in the list so closing the terminal (which sends SIGHUP) tears the
+  # whole tree down too — without it the script orphaned to PID 1 and its
+  # executor + in-flight claude kept running after the window was gone.
+  trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM HUP
+  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C or closing this window stops UI + executor; or run: mux stop)"
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
   if [ -z "${MUX_NO_OPEN:-}" ]; then
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
