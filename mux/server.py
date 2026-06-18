@@ -409,7 +409,12 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
   background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
  #counts,#provider{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
- main{display:grid;grid-template-columns:2fr 3fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
+ /* Resizable split: a draggable #splitter sits between the two sections as a
+    grid column; --split (a %) drives the Tasks column, 1fr fills the rest. */
+ main{display:grid;grid-template-columns:var(--split,40%) 6px 1fr;background:#2a2620;height:calc(100vh - 49px)}
+ #splitter{background:#2a2620;cursor:col-resize}
+ #splitter:hover,body.dragging #splitter{background:var(--accent)}
+ body.dragging{user-select:none}
  section{background:#1a1815;overflow:auto;padding:12px 16px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
  .RUNNING{color:var(--accent)}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
@@ -448,6 +453,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <button onclick="planner()">+ planner</button></header>
 <main>
  <section><div id=tasks></div></section>
+ <div id=splitter></div>
  <section><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
@@ -455,6 +461,22 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 <script>
 const E=(s)=>document.getElementById(s)
 const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
+// Draggable splitter: --split is the Tasks-column width as a %, clamped 20-80%,
+// persisted in localStorage (mux.split). Absent -> CSS default of 40%.
+(function(){const saved=localStorage.getItem("mux.split")
+ if(saved)document.documentElement.style.setProperty("--split",saved+"%")
+ const sp=E("splitter"),main=document.querySelector("main")
+ sp.addEventListener("pointerdown",e=>{e.preventDefault();sp.setPointerCapture(e.pointerId)
+  document.body.classList.add("dragging")
+  const move=ev=>{const r=main.getBoundingClientRect()
+   let pct=(ev.clientX-r.left)/r.width*100
+   pct=Math.max(20,Math.min(80,pct))
+   document.documentElement.style.setProperty("--split",pct+"%")
+   localStorage.setItem("mux.split",pct.toFixed(2))}
+  const up=()=>{document.body.classList.remove("dragging")
+   sp.removeEventListener("pointermove",move);sp.removeEventListener("pointerup",up)}
+  sp.addEventListener("pointermove",move);sp.addEventListener("pointerup",up)})
+})()
 function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
 function openSummary(){E("planframe").src='/summary';document.body.classList.add("drawer-open")}
 function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
@@ -538,8 +560,11 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("content-type", ctype)
         self.send_header("content-length", str(len(b)))
-        self.end_headers()
-        self.wfile.write(b)
+        try:
+            self.end_headers()
+            self.wfile.write(b)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client navigated away / cancelled a poll before we finished — harmless
 
     def _body(self):
         n = int(self.headers.get("content-length", 0))
