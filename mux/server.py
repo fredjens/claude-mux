@@ -295,6 +295,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  header{padding:10px 16px;background:#13110e;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
  header b{color:#ffffff} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #3a342c;
   background:#241f1a;color:#e3ddd1;border-radius:6px;padding:3px 9px} button:hover{border-color:#d97757}
+ #counts{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
  main{display:grid;grid-template-columns:2fr 3fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
  section{background:#1a1815;overflow:auto;padding:12px 16px} h2{font-size:12px;letter-spacing:.08em;
   text-transform:uppercase;color:#8a8072;margin:0 0 10px;position:sticky;top:0;z-index:1;
@@ -329,7 +330,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #drawer .dclose:hover{border-color:#d97757}
  #drawer iframe{flex:1;width:100%;border:0;background:#fff}
 </style>
-<header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span>
+<header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span><span id=counts></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button onclick="planner()">+ planner</button></header>
 <main>
@@ -396,6 +397,9 @@ async function refresh(){
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open onclick="event.stopPropagation();window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open in new tab">↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
+ const order=["RUNNING","READY","BLOCKED","DRAFT","FAILED","DONE"]
+ const by={};ts.forEach(t=>by[t.status]=(by[t.status]||0)+1)
+ E("counts").innerHTML=order.filter(s=>by[s]).map(s=>`<span class=${s}>${by[s]} ${s.toLowerCase()}</span>`).join("<span class=sep>·</span>")
  const nowt=ts.find(t=>t.executing)||ts.find(t=>t.current&&t.status=="RUNNING")
  E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">📄 ${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
  const lg=await (await fetch("/api/log")).json()
