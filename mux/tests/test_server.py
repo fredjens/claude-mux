@@ -178,6 +178,50 @@ class LogLinesTest(unittest.TestCase):
         server.idle_reason = lambda: "No activity"
         self.assertEqual(server.log_lines(), ["No activity"])
 
+    def test_long_markdown_message_is_click_to_view(self):
+        # A multi-line markdown assistant message is NOT dumped raw into the log;
+        # it becomes a click-to-view dict entry carrying its assistant_texts index.
+        logdir = os.path.join(self.tmp, ".mux", "log")
+        os.makedirs(logdir)
+        md = "## Heading\n\n- a bullet\n- another **bold** line"
+        events = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "short note"},
+                {"type": "text", "text": md},
+            ]}},
+        ]
+        with open(os.path.join(logdir, "output.jsonl"), "w") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+        lines = server.log_lines()
+        # short stays inline as a plain string; the raw markdown does not appear
+        self.assertIn("● short note", lines)
+        self.assertFalse(any(isinstance(l, str) and "## Heading" in l for l in lines))
+        # the long one is a dict pointing at assistant_texts index 1
+        dicts = [l for l in lines if isinstance(l, dict)]
+        self.assertEqual(len(dicts), 1)
+        self.assertEqual(dicts[0]["n"], 1)
+        self.assertEqual(server.assistant_texts()[dicts[0]["n"]], md)
+
+    def test_message_page_renders_indexed_text(self):
+        logdir = os.path.join(self.tmp, ".mux", "log")
+        os.makedirs(logdir)
+        md = "## Title\n\nbody text"
+        events = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": md},
+            ]}},
+        ]
+        with open(os.path.join(logdir, "output.jsonl"), "w") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+        html = server.message_page("0")
+        self.assertIn("Output message", html)
+        self.assertIn("Title", html)        # markdown body is JSON-embedded for marked.js
+        # out-of-range / non-numeric indexes degrade to a placeholder, never crash
+        self.assertIn("message not found", server.message_page("9"))
+        self.assertIn("message not found", server.message_page("nope"))
+
 
 class HttpRoutingTest(unittest.TestCase):
     def setUp(self):

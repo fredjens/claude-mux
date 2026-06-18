@@ -23,13 +23,14 @@ WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendo
 # ONE place here, so re-skinning for a different output backend = changing/adding
 # one entry and setting MUX_PROVIDER. Unknown providers fall back to "generic".
 # The default (claude) is a warm, mellow dark-on-cream look whose accents are a
-# small family of soft pastels (apricot accent + sage/lilac/rose status roles)
-# rather than one hot terracotta — calmer and fresher, not neutral grey. The
-# success/subagent/danger roles are status semantics (shared across providers);
-# only `accent` and `label` are brand-specific.
-_PASTELS = {"success": "#a6c19a", "subagent": "#c2a7d6", "danger": "#db9a8c"}
+# small family of bright-but-muted pastels (a cool cyan accent + mint/lilac/pink
+# status roles) — fresh and a little playful against the warm grays, never neutral
+# grey and deliberately not the old terracotta orange. The success/subagent/danger
+# roles are status semantics (shared across providers); only `accent` and `label`
+# are brand-specific.
+_PASTELS = {"success": "#aed99a", "subagent": "#c9aef0", "danger": "#e8a0ac"}
 THEMES = {
-    "claude":  {"accent": "#e6a07c", "label": "Claude",   **_PASTELS},
+    "claude":  {"accent": "#7fcac4", "label": "Claude",   **_PASTELS},
     "openai":  {"accent": "#6cc0a4", "label": "OpenAI",   **_PASTELS},
     "gemini":  {"accent": "#8badf0", "label": "Gemini",   **_PASTELS},
     "generic": {"accent": "#a89e8e", "label": "Output", **_PASTELS},
@@ -182,8 +183,36 @@ def result_summary(ev):
     return "Σ " + " · ".join(segs) if segs else ""
 
 
+def assistant_texts(limit=300):
+    """Every assistant text-block string from the latest tick log, in order.
+    Index aligns 1:1 with the `n` carried by `log_lines`' click-to-view entries,
+    so `/message?n=` can resolve a log entry back to its full markdown body."""
+    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
+    out = []
+    try:
+        with open(path) as f:
+            raw = f.readlines()[-limit:]
+    except OSError:
+        return out
+    for line in raw:
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "assistant":
+            for blk in ev.get("message", {}).get("content", []):
+                if blk.get("type") == "text" and blk.get("text", "").strip():
+                    out.append(blk["text"].strip())
+    return out
+
+
 def log_lines(limit=300):
-    """Render the latest tick log (Claude stream-json) into readable lines."""
+    """Render the latest tick log (Claude stream-json) into readable lines.
+
+    Returns a list whose items are either plain strings (the readable event
+    stream) or, for long/multi-line assistant markdown messages, dicts of the
+    form {"glyph","summary","n"} — a click-to-view entry the UI renders as a
+    link into the markdown drawer instead of dumping raw `##`/`**` into the log."""
     path = os.path.join(REPO, ".mux", "log", "output.jsonl")
     out = []
     try:
@@ -192,6 +221,7 @@ def log_lines(limit=300):
     except OSError:
         return [idle_reason() or "Starting…"]
     cycle = 0
+    tidx = 0          # assistant text-block counter; aligns with assistant_texts()
     thinking = False  # whether the last rendered line is the "thinking…" line
     for line in raw:
         try:
@@ -227,7 +257,17 @@ def log_lines(limit=300):
         elif t == "assistant":
             for blk in ev.get("message", {}).get("content", []):
                 if blk.get("type") == "text" and blk.get("text", "").strip():
-                    out.append("● " + blk["text"].strip())
+                    txt = blk["text"].strip()
+                    # Long / multi-line markdown messages aren't dumped raw into
+                    # the log (they render as unreadable ## / ** noise). Emit a
+                    # click-to-view entry instead; the full text opens in the
+                    # markdown drawer via `/message?n=`. Short one-liners stay
+                    # inline. `tidx` aligns with assistant_texts().
+                    if "\n" in txt or len(txt) > 200:
+                        out.append({"glyph": "●", "summary": _clip(txt), "n": tidx})
+                    else:
+                        out.append("● " + txt)
+                    tidx += 1
                     thinking = False
                 elif blk.get("type") == "tool_use":
                     out.append(tool_line(blk))
@@ -277,7 +317,6 @@ def _md_page(title, meta_chips_html, body_md):
     plain text, `meta_chips_html` is trusted inline HTML, `body_md` is markdown."""
     hjs = json.dumps(f'<div class=title>{escape(title)}</div><div class=meta>{meta_chips_html}</div>').replace("</", "<\\/")
     bjs = json.dumps(body_md).replace("</", "<\\/")
-    acc = theme()["accent"]   # link color follows the active provider accent
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <script src="/web/vendor/marked.min.js"></script>
 <style>body{{margin:0;background:#1a1815;color:#dcd6ca}}
@@ -306,8 +345,8 @@ def _md_page(title, meta_chips_html, body_md):
   border-radius:50%;background:#6e6555}}
  .md ol{{padding-left:1.6em}}
  .md li::marker{{color:#807767}}
- .md a{{color:{acc};text-decoration:none;border-bottom:1px solid #5c3e30}}
- .md a:hover{{border-bottom-color:{acc}}}
+ .md a{{color:#cfc9bc;text-decoration:none;border-bottom:1px solid #3a342c}}
+ .md a:hover{{border-bottom-color:#5c5345}}
  .md strong{{color:#f3eee4;font-weight:600}}
  .md em{{color:#e6e0d4}}
  .md code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:#211d18;
@@ -370,6 +409,18 @@ def summary_page():
     """Render the latest output summary through the shared markdown drawer page."""
     text, meta = latest_summary()
     return _md_page("Output summary", meta, text)
+
+
+def message_page(n):
+    """Render a single assistant message (by `assistant_texts` index) through the
+    shared markdown drawer page — the target of a log's click-to-view entry."""
+    texts = assistant_texts()
+    try:
+        i = int(n)
+    except (TypeError, ValueError):
+        i = -1
+    body = texts[i] if 0 <= i < len(texts) else "(message not found)"
+    return _md_page("Output message", "", body)
 
 
 def spawn_channel(name=None):
@@ -472,6 +523,9 @@ class H(BaseHTTPRequestHandler):
             self._send(200, plan_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
         elif self.path == "/summary":
             self._send(200, summary_page(), "text/html; charset=utf-8")
+        elif self.path.startswith("/message?"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, message_page(q.get("n", [""])[0]), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
             # against WEB and confined to it — normpath collapses any ../ so a
