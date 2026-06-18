@@ -232,10 +232,10 @@ async function act(verb,id,prompt){let text=""
 function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
  .catch(e=>alert("planner failed: "+e))}
 function buttons(t){const b=[],f=t.file
- if(t.status=="DRAFT")b.push(`<button onclick="act('release','${f}')">Approve</button>`)
+ if(t.status=="DRAFT")b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return `<div class=acts><span class=run>working…</span></div>`
-  b.push(`<button onclick="act('ok')">approve</button>`)
+  b.push(`<button onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
  return `<div class=acts>${b.join("")}</div>`}
