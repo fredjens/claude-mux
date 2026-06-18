@@ -337,6 +337,25 @@ test_revert_fail_discard() {
 }
 
 # ==========================================================================
+# 7b. delete removes a FAILED task file; refuses any other state.
+# ==========================================================================
+test_delete() {
+  header "delete clears a FAILED task, refuses others"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-del.task.md"
+  mk_task "$d" "20200101-000000-del.task.md" FAILED
+  m "$d" delete del
+  assert_zero "delete exits 0 on a FAILED task"
+  assert "delete removed the task file" test ! -e "$f"
+
+  local g="$d/.mux/tasks/20200101-000000-rdy.task.md"
+  mk_task "$d" "20200101-000000-rdy.task.md" READY
+  m "$d" delete rdy
+  assert_nonzero "delete refuses a non-FAILED task"
+  assert "delete left the non-FAILED file in place" test -e "$g"
+}
+
+# ==========================================================================
 # 8. cmd_next selection logic.
 # ==========================================================================
 test_next_dirty() {
@@ -525,6 +544,7 @@ test_ok_commit
 test_ok_commit_summary_and_board
 test_depends_on_deleted_dep
 test_revert_fail_discard
+test_delete
 test_next_dirty
 test_next_running_wins
 test_next_fifo

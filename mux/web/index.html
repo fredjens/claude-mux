@@ -147,13 +147,17 @@ function buttons(t){const b=[],f=t.file
   if(!auto)b.push(`<button class=primary onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
+ // FAILED is terminal & already discarded — the only way forward is to clear it
+ // off the board. (If it kept a session, the resume button below also appears.)
+ if(t.status=="FAILED")b.push(`<button class=danger onclick="if(confirm('Delete this failed task?'))act('delete','${f}')">delete</button>`)
  // Resume/direct the recorded session — but NEVER while a tick is live
  // (t.executing): a second claude would collide with the headless tick.
- // STUCK (BLOCKED or RUNNING killed mid-tick) → "resume ⇥"; a healthy
- // RUNNING task awaiting approval → "direct ⇥" to steer it interactively.
+ // STUCK (BLOCKED, RUNNING killed mid-tick, or FAILED) → "resume ⇥" to
+ // re-open the chat and keep fixing it; a healthy RUNNING task awaiting
+ // approval → "direct ⇥" to steer it interactively.
  // Pushed LAST so it renders after revert.
  if(t.session&&!t.executing){
-  const stuck=t.awaiting_answer||t.interrupted
+  const stuck=t.awaiting_answer||t.interrupted||t.status=="FAILED"
   const awaiting=t.status=="RUNNING"&&!stuck
   if(stuck||awaiting)
    b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}

@@ -30,6 +30,7 @@
 #   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
 #   mux fail     <id> <why...>  RUNNING-> FAILED  (output: discard + reason)
+#   mux delete   <id>           remove a FAILED task file (clear it off the board)
 #   mux help
 #
 # <id> is any unique substring of a task's filename (usually its slug).
@@ -303,6 +304,17 @@ cmd_revert() {
   set_status "$f" FAILED
   append_block "$f" "# Reverted: $(stamp)${*:+ — $*}"
   echo "↩ ${f##*/} reverted — changes discarded, marked FAILED"
+}
+
+# Permanently remove a dead task file so it stops cluttering the board. Only a
+# FAILED task may be deleted — its changes are already discarded, so there is
+# nothing left to lose; any other state must go through the lifecycle first.
+cmd_delete() {
+  [ $# -ge 1 ] || die "usage: mux delete <id>"
+  local f; f="$(resolve_id "$1")"
+  require_status "$f" FAILED
+  rm -f "$f"
+  echo "🗑 ${f##*/} deleted"
 }
 
 # Approve the RUNNING task: commit its working-tree changes as ONE commit on the
@@ -610,6 +622,7 @@ case "$cmd" in
   resolve)        cmd_resolve "$@" ;;
   fail)           cmd_fail "$@" ;;
   revert)         cmd_revert "$@" ;;
+  delete|rm)      cmd_delete "$@" ;;
   ok)             cmd_ok "$@" ;;
   changes)        cmd_changes "$@" ;;
   show)           cmd_show "$@" ;;
