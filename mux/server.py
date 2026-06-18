@@ -348,6 +348,24 @@ def spawn_planner(name=None):
     subprocess.Popen(["osascript", "-e", script])
 
 
+def spawn_resume(sid):
+    """Open a Terminal.app window continuing a stuck task's exact claude session.
+    INTERACTIVE — the human drives, so no -p/stream-json/skip-permissions; normal
+    permission prompts apply. Returns False if sid is not a valid session id."""
+    if not re.fullmatch(r"[0-9a-f-]{36}", sid or ""):
+        return False
+    cmd = f'cd {json.dumps(REPO)} && claude --resume {sid}'.replace('"', '\\"')
+    script = (
+        'tell application "Terminal"\n'
+        '  activate\n'
+        f'  set w to do script "{cmd}"\n'
+        '  set index of (first window whose tabs contains w) to 1\n'
+        'end tell'
+    )
+    subprocess.Popen(["osascript", "-e", script])
+    return True
+
+
 PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 <style>
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
@@ -434,6 +452,9 @@ async function act(verb,id,prompt){let text=""
  refresh()}
 function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
  .catch(e=>alert("planner failed: "+e))}
+// Open a Terminal continuing a stuck task's exact claude session (human-driven).
+function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})})
+ .then(r=>r.json()).then(d=>{if(!d.ok)alert("resume failed:\\n"+(d.out||""))}).catch(e=>alert("resume failed: "+e))}
 // Auto mode (persisted server-side). When ON the toggle does the Release/Approve
 // gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
 let auto=false
@@ -444,6 +465,10 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
   auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
+ // Resume only for stuck tasks (BLOCKED, or RUNNING killed mid-tick) — never a
+ // normally executing task: a second claude would collide with the live tick.
+ if(t.session&&(t.awaiting_answer||t.interrupted))
+  b.push(`<button onclick="resume('${t.session}')">resume ⇥</button>`)
  if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return ""
@@ -538,6 +563,10 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/api/planner":
             spawn_planner(d.get("name"))
             self._send(200, json.dumps({"ok": True}))
+        elif self.path == "/api/resume":
+            ok = spawn_resume(d.get("id"))
+            self._send(200 if ok else 400,
+                       json.dumps({"ok": ok, "out": "" if ok else "invalid session id"}))
         else:
             self._send(404, "{}")
 

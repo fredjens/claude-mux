@@ -101,6 +101,7 @@ json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # Is the RUNNING task approved? / dependency of a task and its done-state.
 task_dep()   { grep -m1 -i '^# Depends-on:' "$1" | sed 's/.*Depends-on:[[:space:]]*//' | awk '{print $1}' || true; }
+task_session() { grep -m1 -i '^# Session:' "$1" | sed 's/.*Session:[[:space:]]*//' | awk '{print $1}' || true; }
 
 # Is a dependency satisfied? $1 = the dependency's task filename. Approved tasks
 # are DELETED (their file is gone), so the real check is the done.log ledger; the
@@ -183,6 +184,23 @@ mark_interrupted() {
   done
   [ "$n" -eq 1 ] || return 0
   grep -qi '^# Interrupted:' "$found" || append_block "$found" "# Interrupted: $(stamp)"
+}
+
+# Pin a tick's claude session id onto the single RUNNING task, so a stuck task
+# can be resumed interactively later (the rolling log tail won't still hold it).
+# Same defensive stance as mark_interrupted: act only when exactly one task is
+# RUNNING, never error. Unlike mark_interrupted, REPLACE any prior `# Session:`
+# line — a task can be ticked more than once; keep only the latest id. The id is
+# validated to look like a session id so a stray log line can't poison the file.
+record_session() {
+  local id="$1" f found="" n=0
+  printf '%s' "$id" | grep -Eqi '^[0-9a-f-]{36}$' || return 0
+  for f in "$TASKS"/*.task.md; do
+    if [ "$(task_status "$f")" = RUNNING ]; then found="$f"; n=$((n+1)); fi
+  done
+  [ "$n" -eq 1 ] || return 0
+  grep -vi '^# Session:' "$found" > "$found.tmp" && mv "$found.tmp" "$found"
+  append_block "$found" "# Session: $id"
 }
 
 # Refuse an illegal transition with a clear message.
@@ -359,7 +377,7 @@ cmd_status() {
 cmd_status_json() {
   local tasks=( "$TASKS"/*.task.md )
   [ ${#tasks[@]} -gt 0 ] || { printf '[]\n'; return 0; }
-  local f status dep depstatus approved awaiting current next exec_now interrupted next_marked=0 sep=""
+  local f status dep depstatus approved awaiting current next exec_now interrupted session next_marked=0 sep=""
   local executing=false; [ -d .mux/tick.lock ] && executing=true
   # Interrupted is live only while the tree is dirty (see cmd_status).
   local dirty=false; git_clean || dirty=true
@@ -381,8 +399,10 @@ cmd_status_json() {
     else
       dep=null; depstatus=null
     fi
-    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s}' \
-      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus"
+    session="$(task_session "$f")"
+    if [ -n "$session" ]; then session="\"$(json_escape "$session")\""; else session=null; fi
+    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s,"session":%s}' \
+      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus" "$session"
     sep=","
   done
   printf ']\n'
@@ -488,6 +508,9 @@ cmd_tick() {
   echo "$cpid" > .mux/run/tick.pid
   wait "$cpid" 2>/dev/null || true
   rm -f .mux/run/tick.pid
+  # Pin the session id this tick used onto its RUNNING task (last one wins) so a
+  # stuck task can be resumed interactively. Do this BEFORE dropping the lock.
+  record_session "$(grep -o '"session_id":"[0-9a-f-]\{36\}"' "$log" 2>/dev/null | tail -n1 | sed 's/.*"session_id":"\(.*\)"/\1/')"
   rmdir .mux/tick.lock 2>/dev/null || true
   [ "$(wc -l < "$log" 2>/dev/null || echo 0)" -gt 4000 ] && { tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; } || true
 }
