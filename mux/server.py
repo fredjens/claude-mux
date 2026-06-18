@@ -227,7 +227,11 @@ def log_lines(limit=300):
                     thinking = False
         elif t == "result":
             glyph = "✗" if ev.get("is_error") else "✓"
-            out.append(glyph + " " + str(ev.get("result", "done")).strip())
+            # Keep the log a tidy event stream: collapse the (often multi-line,
+            # markdown) result to a single clipped line. The full formatted text
+            # lives in the drawer via `summary_page()`.
+            res = str(ev.get("result", "done")).strip()
+            out.append(glyph + " " + _clip(res.splitlines()[0] if res else "done"))
             stats = result_summary(ev)
             if stats:
                 out.append(stats)
@@ -247,19 +251,12 @@ def read_task(name):
         return "(task not found)"
 
 
-def plan_page(name):
-    """Render a task with marked.js + GitHub theme. The `# Key: value` metadata
-    lines become a compact header (not giant H1s); only the body goes to marked."""
-    slug = os.path.basename(name or "").replace(".task.md", "") or "task"
-    meta, rest = [], []
-    for line in read_task(name).splitlines():
-        m = re.match(r"# ([\w][\w -]*?):\s*(.*)$", line)
-        if m: meta.append((m.group(1), m.group(2)))
-        else: rest.append(line)
-    title = next((v for k, v in meta if k.lower() == "task"), slug)
-    chips = "  ·  ".join(f"<b>{escape(k)}</b> {escape(v)}" for k, v in meta if k.lower() != "task")
-    hjs = json.dumps(f'<div class=title>{escape(title)}</div><div class=meta>{chips}</div>').replace("</", "<\\/")
-    bjs = json.dumps("\n".join(rest)).replace("</", "<\\/")
+def _md_page(title, meta_chips_html, body_md):
+    """The shared styled-markdown document used by the drawer (plan + summary):
+    dark serif prose via marked.js, with a `.title`/`.meta` header. `title` is
+    plain text, `meta_chips_html` is trusted inline HTML, `body_md` is markdown."""
+    hjs = json.dumps(f'<div class=title>{escape(title)}</div><div class=meta>{meta_chips_html}</div>').replace("</", "<\\/")
+    bjs = json.dumps(body_md).replace("</", "<\\/")
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <script src="/web/marked.min.js"></script>
 <style>body{{margin:0;background:#13110e;color:#e3ddd1}}
@@ -287,6 +284,51 @@ def plan_page(name):
  @media(max-width:760px){{.md{{padding:18px}}}}</style>
 <article class="md" id=md></article>
 <script>document.getElementById("md").innerHTML={hjs}+marked.parse({bjs})</script>"""
+
+
+def plan_page(name):
+    """Render a task with marked.js + GitHub theme. The `# Key: value` metadata
+    lines become a compact header (not giant H1s); only the body goes to marked."""
+    slug = os.path.basename(name or "").replace(".task.md", "") or "task"
+    meta, rest = [], []
+    for line in read_task(name).splitlines():
+        m = re.match(r"# ([\w][\w -]*?):\s*(.*)$", line)
+        if m: meta.append((m.group(1), m.group(2)))
+        else: rest.append(line)
+    title = next((v for k, v in meta if k.lower() == "task"), slug)
+    chips = "  ·  ".join(f"<b>{escape(k)}</b> {escape(v)}" for k, v in meta if k.lower() != "task")
+    return _md_page(title, chips, "\n".join(rest))
+
+
+def latest_summary():
+    """Return (markdown_text, meta_chips_html) for the most recent executor
+    `result` event in executor.jsonl — the final assistant summary, plus its
+    `Σ …` cost/turn stats as a meta line. Parse defensively (skip undecodable
+    lines like `log_lines()` does); return a placeholder when the file is
+    missing/unreadable or holds no `result` event."""
+    path = os.path.join(REPO, ".mux", "log", "executor.jsonl")
+    last = None
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "result":
+                    last = ev
+    except OSError:
+        return "(no executor summary yet)", ""
+    if last is None:
+        return "(no executor summary yet)", ""
+    text = str(last.get("result", "")).strip() or "(no executor summary yet)"
+    return text, escape(result_summary(last))
+
+
+def summary_page():
+    """Render the latest executor summary through the shared markdown drawer page."""
+    text, meta = latest_summary()
+    return _md_page("Executor summary", meta, text)
 
 
 def spawn_planner(name=None):
@@ -327,6 +369,9 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+ #summarybar{margin:0 0 10px}
+ #summarybar .slink{cursor:pointer;font-size:12px;color:#8a8072}
+ #summarybar .slink:hover{color:#e3ddd1}
  #nowrunning:empty{display:none}
  #nowrunning .pill{display:inline-block;cursor:pointer;font-size:12px;color:#d97757;margin:0 0 10px}
  #nowrunning .pill:hover{color:#e3ddd1}
@@ -351,7 +396,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <button onclick="planner()">+ planner</button></header>
 <main>
  <section><h2>Tasks</h2><div id=tasks></div></section>
- <section><h2>Executor</h2><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
+ <section><h2>Executor</h2><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
@@ -359,6 +404,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 const E=(s)=>document.getElementById(s)
 const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
 function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
+function openSummary(){E("planframe").src='/summary';document.body.classList.add("drawer-open")}
 function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
 document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
 // Working indicator: server says executing/elapsed (polled in refresh); the
@@ -461,6 +507,8 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/plan?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, plan_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
+        elif self.path == "/summary":
+            self._send(200, summary_page(), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             name = os.path.basename(self.path.split("?")[0])
             ctype = "text/css" if name.endswith(".css") else "application/javascript"
