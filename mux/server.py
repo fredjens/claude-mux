@@ -205,7 +205,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  .BLOCKED{color:#c678dd}.DRAFT{color:#7c8a99} .t .nm{color:#cdd6df;margin:2px 0;cursor:pointer} .open{color:#56708f}
  button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d65a5a}
  .run{display:inline-flex;align-items:center;gap:8px;color:#e0a33e;font-size:12px}
- .shimmer{background:linear-gradient(90deg,#a8741f 0%,#cdd6df 20%,#fff6e6 50%,#cdd6df 80%,#a8741f 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
+ .shimmer{background:linear-gradient(90deg,#5a6675 0%,#9fb0c0 20%,#e6edf3 50%,#9fb0c0 80%,#5a6675 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#0c0f13;border-radius:6px;color:#9fb0c0;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
@@ -234,7 +234,7 @@ function planner(){fetch("/api/planner",{method:"POST",headers:{"content-type":"
 function buttons(t){const b=[],f=t.file
  if(t.status=="DRAFT")b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
-  if(t.executing)return `<div class=acts><span class=run>working…</span></div>`
+  if(t.executing)return ""
   b.push(`<button onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
