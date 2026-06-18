@@ -19,18 +19,24 @@ MUX  = os.environ.get("MUX_BIN", "mux")
 PORT = int(os.environ.get("MUX_PORT", "8770"))   # not 7000: macOS AirPlay uses it
 WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendored marked + theme
 
-# Provider→theme map: the UI accent + header label come from ONE place here, so
-# re-skinning for a different executor backend = changing/adding one entry and
-# setting MUX_PROVIDER. Unknown providers fall back to the neutral "generic".
+# Provider→theme map: the UI accent + supporting pastels + header label come from
+# ONE place here, so re-skinning for a different executor backend = changing/adding
+# one entry and setting MUX_PROVIDER. Unknown providers fall back to "generic".
+# The default (claude) is a warm, mellow dark-on-cream look whose accents are a
+# small family of soft pastels (apricot accent + sage/lilac/rose status roles)
+# rather than one hot terracotta — calmer and fresher, not neutral grey. The
+# success/subagent/danger roles are status semantics (shared across providers);
+# only `accent` and `label` are brand-specific.
+_PASTELS = {"success": "#a6c19a", "subagent": "#c2a7d6", "danger": "#db9a8c"}
 THEMES = {
-    "claude": {"accent": "#d97757", "label": "Claude"},
-    "openai": {"accent": "#10a37f", "label": "OpenAI"},
-    "gemini": {"accent": "#4285f4", "label": "Gemini"},
-    "generic": {"accent": "#8a8072", "label": "Executor"},
+    "claude":  {"accent": "#e6a07c", "label": "Claude",   **_PASTELS},
+    "openai":  {"accent": "#6cc0a4", "label": "OpenAI",   **_PASTELS},
+    "gemini":  {"accent": "#8badf0", "label": "Gemini",   **_PASTELS},
+    "generic": {"accent": "#a89e8e", "label": "Executor", **_PASTELS},
 }
 
 def theme():
-    """The active provider's theme (accent + label), from MUX_PROVIDER."""
+    """The active provider's theme (accent/pastels + label), from MUX_PROVIDER."""
     return THEMES.get(os.environ.get("MUX_PROVIDER", "claude"), THEMES["generic"])
 
 
@@ -436,7 +442,11 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             t = theme()
-            page = PAGE.replace("__ACCENT__", t["accent"]).replace("__PROVIDER__", escape(t["label"]))
+            page = (PAGE.replace("__ACCENT__", t["accent"])
+                        .replace("__OK__", t["success"])
+                        .replace("__SUB__", t["subagent"])
+                        .replace("__DANGER__", t["danger"])
+                        .replace("__PROVIDER__", escape(t["label"])))
             self._send(200, page, "text/html; charset=utf-8")
         elif self.path == "/api/tasks":
             if auto_enabled():
