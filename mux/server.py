@@ -415,6 +415,14 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #splitter{background:#2a2620;cursor:col-resize}
  #splitter:hover,body.dragging #splitter{background:var(--accent)}
  body.dragging{user-select:none}
+ /* Narrow viewport: stack Tasks above Executor and let the page scroll
+    instead of squeezing two columns. Hide the splitter (no col-resize when
+    stacked) and drop the fixed viewport height so the sections flow. */
+ @media(max-width:720px){
+  main{grid-template-columns:1fr;height:auto}
+  #splitter{display:none}
+  section{min-height:50vh}
+ }
  section{background:#1a1815;overflow:auto;padding:12px 16px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
  .RUNNING{color:var(--accent)}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
