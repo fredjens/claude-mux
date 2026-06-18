@@ -289,6 +289,15 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
  #log .l{padding:1px 0} .la{color:#ece6da} .lt{color:#c98c6d} .lr{color:#6fae7a} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:#b292c4} .le{color:#d6705f} .lm{color:#a89e8e}
+ #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
+ #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#13110e;border-left:1px solid #2a2620;
+  display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
+ body.drawer-open #backdrop{opacity:1;pointer-events:auto}
+ body.drawer-open #drawer{transform:translateX(0)}
+ #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#0c0f13}
+ #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#d6dde6;border-radius:6px;padding:1px 9px;line-height:1.4}
+ #drawer .dclose:hover{border-color:#d97757}
+ #drawer iframe{flex:1;width:100%;border:0;background:#fff}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span>
  <button onclick="planner()">+ planner</button></header>
@@ -296,9 +305,14 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <section><h2>Tasks</h2><div id=tasks></div></section>
  <section><h2>Executor</h2><div id=working></div><pre id=log></pre></section>
 </main>
+<div id=backdrop onclick="closePlan()"></div>
+<div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
 <script>
 const E=(s)=>document.getElementById(s)
 const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
+function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
+function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
+document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
 // Working indicator: server says executing/elapsed (polled in refresh); the
 // counter is driven client-side from a start time so it ticks every second
 // without hammering the server. work.start=null means no cycle in flight.
@@ -340,7 +354,7 @@ async function refresh(){
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
   `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
-  `<div class=nm onclick="window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open>↗</span></div>`+
+  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open onclick="event.stopPropagation();window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open in new tab">↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
  const lg=await (await fetch("/api/log")).json()
  E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
