@@ -261,14 +261,31 @@ def plan_page(name):
     hjs = json.dumps(f'<div class=title>{escape(title)}</div><div class=meta>{chips}</div>').replace("</", "<\\/")
     bjs = json.dumps("\n".join(rest)).replace("</", "<\\/")
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
-<link rel=stylesheet href="/web/github-markdown.min.css">
 <script src="/web/marked.min.js"></script>
-<style>body{{margin:0;color-scheme:light dark;background:#fff}}
- @media(prefers-color-scheme:dark){{body{{background:#0d1117}}}}
- .markdown-body{{box-sizing:border-box;max-width:1080px;margin:0 auto;padding:34px 44px;min-height:100vh}}
- .title{{font-size:20px;font-weight:700}} .meta{{font:12px/1.7 ui-monospace,Menlo,monospace;color:#8a98a8;margin:3px 0 12px}}
- @media(max-width:760px){{.markdown-body{{padding:18px}}}}</style>
-<article class="markdown-body" id=md></article>
+<style>body{{margin:0;background:#13110e;color:#e3ddd1}}
+ .md{{box-sizing:border-box;max-width:760px;margin:0 auto;padding:34px 44px;min-height:100vh;
+  font:17px/1.7 Georgia,"Iowan Old Style","Palatino",serif}}
+ .title{{font:600 21px/1.3 Georgia,"Iowan Old Style","Palatino",serif;color:#f0ebe0}}
+ .meta{{font:12px/1.7 ui-monospace,Menlo,monospace;color:#8a8072;margin:4px 0 22px;
+  padding-bottom:14px;border-bottom:1px solid #2a2620}}
+ .meta b{{color:#a89e8e;font-weight:600}}
+ .md h1,.md h2,.md h3,.md h4{{font-family:Georgia,"Iowan Old Style","Palatino",serif;
+  color:#f0ebe0;line-height:1.3;margin:1.6em 0 .5em}}
+ .md h1{{font-size:24px}} .md h2{{font-size:20px;padding-bottom:.25em;border-bottom:1px solid #2a2620}}
+ .md h3{{font-size:17px}} .md h4{{font-size:15px;color:#d8d2c6}}
+ .md p,.md li{{margin:.6em 0}} .md ul,.md ol{{padding-left:1.5em}}
+ .md a{{color:#d97757;text-decoration:none}} .md a:hover{{text-decoration:underline}}
+ .md strong{{color:#f0ebe0}}
+ .md code{{font:13.5px/1.5 ui-monospace,Menlo,monospace;background:#1f1b16;border:1px solid #2a2620;
+  border-radius:4px;padding:.1em .4em;color:#e0c9a8}}
+ .md pre{{background:#0d0b09;border:1px solid #2a2620;border-radius:8px;padding:14px 16px;overflow:auto}}
+ .md pre code{{background:none;border:0;padding:0;color:#d8d2c6;font-size:13px;line-height:1.6}}
+ .md blockquote{{margin:.8em 0;padding:.1em 1em;border-left:3px solid #2a2620;color:#a89e8e}}
+ .md hr{{border:0;border-top:1px solid #2a2620;margin:1.6em 0}}
+ .md table{{border-collapse:collapse}} .md th,.md td{{border:1px solid #2a2620;padding:6px 12px}}
+ .md th{{background:#1f1b16}}
+ @media(max-width:760px){{.md{{padding:18px}}}}</style>
+<article class="md" id=md></article>
 <script>document.getElementById("md").innerHTML={hjs}+marked.parse({bjs})</script>"""
 
 
@@ -302,7 +319,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
   background:#1a1815;padding:12px 0 10px;margin-top:-12px} .t{padding:8px 10px;border:1px solid #2a2620;
   border-radius:8px;margin-bottom:8px} .t .st{font-size:11px;font-weight:700;letter-spacing:.05em}
  .RUNNING{color:#5fa8b3}.READY{color:#d4a85a}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
- .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer} .open{color:#8a7d6a}
+ .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
  button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d6705f}
  #autobtn.on{border-color:#d97757;color:#d97757;background:#2a1d16}
  .run{display:inline-flex;align-items:center;gap:8px;color:#d97757;font-size:12px}
@@ -328,7 +345,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#0c0f13}
  #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#d6dde6;border-radius:6px;padding:1px 9px;line-height:1.4}
  #drawer .dclose:hover{border-color:#d97757}
- #drawer iframe{flex:1;width:100%;border:0;background:#fff}
+ #drawer iframe{flex:1;width:100%;border:0;background:#13110e}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span><span id=counts></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
@@ -395,7 +412,7 @@ async function refresh(){
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
   `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
-  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open onclick="event.stopPropagation();window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open in new tab">↗</span></div>`+
+  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
  const order=["RUNNING","READY","BLOCKED","DRAFT","FAILED","DONE"]
  const by={};ts.forEach(t=>by[t.status]=(by[t.status]||0)+1)
