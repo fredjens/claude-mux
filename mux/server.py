@@ -178,8 +178,9 @@ def result_summary(ev):
     out_t, in_t = usage.get("output_tokens"), usage.get("input_tokens")
     if out_t is not None or in_t is not None:
         segs.append(f"{_fmt_tok(out_t or 0)} out / {_fmt_tok(in_t or 0)} in tok")
-    if ev.get("total_cost_usd") is not None:
-        segs.append(f"${float(ev['total_cost_usd']):.4g}")
+    # Deliberately omit `total_cost_usd`: it's the API-equivalent price of the
+    # tokens, which is meaningless (and misleading) on a Claude subscription
+    # where usage isn't billed per token.
     return "Σ " + " · ".join(segs) if segs else ""
 
 
