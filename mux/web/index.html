@@ -127,10 +127,15 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
   auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
- // Resume only for stuck tasks (BLOCKED, or RUNNING killed mid-tick) — never a
- // normally executing task: a second claude would collide with the live tick.
- if(t.session&&(t.awaiting_answer||t.interrupted))
-  b.push(`<button onclick="resume('${t.session}')">resume ⇥</button>`)
+ // Resume/direct the recorded session — but NEVER while a tick is live
+ // (t.executing): a second claude would collide with the headless tick.
+ // STUCK (BLOCKED or RUNNING killed mid-tick) → "resume ⇥"; a healthy
+ // RUNNING task awaiting approval → "direct ⇥" to steer it interactively.
+ if(t.session&&!t.executing){
+  const stuck=t.awaiting_answer||t.interrupted
+  const awaiting=t.status=="RUNNING"&&!stuck
+  if(stuck||awaiting)
+   b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}
  if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return ""
