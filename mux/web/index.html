@@ -131,6 +131,10 @@ function channel(){fetch("/api/channel",{method:"POST",headers:{"content-type":"
 // Open a Terminal continuing a stuck task's exact claude session (human-driven).
 function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})})
  .then(r=>r.json()).then(d=>{if(!d.ok)alert("resume failed:\n"+(d.out||""))}).catch(e=>alert("resume failed: "+e))}
+// Open a Terminal running a FRESH claude seeded to complete a DRAFT task by hand
+// (human-driven). Runs outside the headless board — the task stays DRAFT.
+function direct(file){fetch("/api/direct",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({file})})
+ .then(r=>r.json()).then(d=>{if(!d.ok)alert("direct failed:\n"+(d.out||""))}).catch(e=>alert("direct failed: "+e))}
 // Auto mode (persisted server-side). When ON the toggle does the Release/Approve
 // gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
 let auto=false
@@ -141,7 +145,10 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
   auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
- if(t.status=="DRAFT"&&!auto)b.push(`<button onclick="act('release','${f}')">Release</button>`)
+ if(t.status=="DRAFT"&&!auto){b.push(`<button onclick="act('release','${f}')">Release</button>`)
+  // Drive a DRAFT by hand in a fresh claude session, without releasing it to
+  // the headless tick — the task stays DRAFT on the board.
+  b.push(`<button onclick="direct('${f}')">direct ⇥</button>`)}
  if(t.status=="RUNNING"){
   if(t.executing)return ""
   if(!auto)b.push(`<button class=primary onclick="act('ok')">Approve</button>`)

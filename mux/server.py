@@ -391,6 +391,35 @@ def spawn_resume(sid):
     return True
 
 
+def spawn_direct(task_file):
+    """Open a Terminal.app window running a FRESH interactive claude seeded to
+    work on one DRAFT task. Unlike spawn_resume there is no session to attach to
+    (a DRAFT has never run), so this starts a new session pointed at the task
+    file. INTERACTIVE — the human drives, so no -p/stream-json/skip-permissions;
+    normal permission prompts apply. NOTE: this directed session runs OUTSIDE
+    the headless board — the task stays DRAFT and is never auto-claimed or
+    auto-tracked; the operator drives it by hand. Returns False if task_file is
+    not a valid existing task basename."""
+    name = os.path.basename(task_file or "")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.task\.md", name):
+        return False
+    if not os.path.exists(os.path.join(REPO, ".mux", "tasks", name)):
+        return False
+    prompt = (f"Read .mux/tasks/{name} and complete that task — do everything "
+              f"its Goal and Details require. {name} is your task.")
+    cmd = (f'cd {json.dumps(REPO)} && claude {json.dumps(prompt)}'
+           .replace('"', '\\"'))
+    script = (
+        'tell application "Terminal"\n'
+        '  activate\n'
+        f'  set w to do script "{cmd}"\n'
+        '  set index of (first window whose tabs contains w) to 1\n'
+        'end tell'
+    )
+    subprocess.Popen(["osascript", "-e", script])
+    return True
+
+
 def _read_web(*parts):
     """Read a file under mux/web/ relative to THIS module (not the caller's
     CWD — mux runs from inside arbitrary target repos), as text."""
@@ -494,6 +523,10 @@ class H(BaseHTTPRequestHandler):
             ok = spawn_resume(d.get("id"))
             self._send(200 if ok else 400,
                        json.dumps({"ok": ok, "out": "" if ok else "invalid session id"}))
+        elif self.path == "/api/direct":
+            ok = spawn_direct(d.get("file"))
+            self._send(200 if ok else 400,
+                       json.dumps({"ok": ok, "out": "" if ok else "invalid task file"}))
         else:
             self._send(404, "{}")
 
