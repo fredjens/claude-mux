@@ -318,7 +318,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
   text-transform:uppercase;color:#8a8072;margin:0 0 10px;position:sticky;top:0;z-index:1;
   background:#1a1815;padding:12px 0 10px;margin-top:-12px} .t{padding:8px 10px;border:1px solid #2a2620;
   border-radius:8px;margin-bottom:8px} .t .st{font-size:11px;font-weight:700;letter-spacing:.05em}
- .RUNNING{color:#5fa8b3}.READY{color:#d4a85a}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
+ .RUNNING{color:#5fa8b3}.READY{color:#8fa9bf}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
  .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
  button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d6705f}
  #autobtn.on{border-color:#d97757;color:#d97757;background:#2a1d16}
