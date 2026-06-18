@@ -15,6 +15,7 @@
   section{min-height:50vh}
  }
  section{background:#1a1815;overflow:auto;padding:12px 16px} section+section{border-left:1px solid #2a2620} .t{padding:7px 0;border-bottom:1px solid #221f1a}
+ .phead{margin:0 0 10px;padding:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:#8a8072;border-bottom:1px solid #2a2620}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
  .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
  .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
@@ -52,8 +53,8 @@
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button onclick="planner()">+ planner</button></header>
 <main>
- <section><div id=tasks></div></section>
- <section><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
+ <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
+ <section><h2 class=phead>Output</h2><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
