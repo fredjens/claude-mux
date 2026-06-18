@@ -259,29 +259,49 @@ def _md_page(title, meta_chips_html, body_md):
     bjs = json.dumps(body_md).replace("</", "<\\/")
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <script src="/web/marked.min.js"></script>
-<style>body{{margin:0;background:#13110e;color:#e3ddd1}}
- .md{{box-sizing:border-box;max-width:760px;margin:0 auto;padding:34px 44px;min-height:100vh;
-  font:17px/1.7 Georgia,"Iowan Old Style","Palatino",serif}}
- .title{{font:600 21px/1.3 Georgia,"Iowan Old Style","Palatino",serif;color:#f0ebe0}}
- .meta{{font:12px/1.7 ui-monospace,Menlo,monospace;color:#8a8072;margin:4px 0 22px;
-  padding-bottom:14px;border-bottom:1px solid #2a2620}}
+<style>body{{margin:0;background:#1a1815;color:#dcd6ca}}
+ ::selection{{background:#3a2d24;color:#f0ebe0}}
+ .md{{box-sizing:border-box;max-width:68ch;margin:0 auto;padding:48px 40px 96px;min-height:100vh;
+  font:17px/1.78 Georgia,"Iowan Old Style","Palatino",serif;
+  hanging-punctuation:first allow-end;text-rendering:optimizeLegibility}}
+ .title{{font:600 23px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:#f3eee4;
+  letter-spacing:-.01em;text-wrap:balance}}
+ .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:#807767;margin:7px 0 30px;
+  padding-bottom:18px;border-bottom:1px solid #2a2620;letter-spacing:.01em}}
  .meta b{{color:#a89e8e;font-weight:600}}
+ .md>:first-child{{margin-top:0}}
  .md h1,.md h2,.md h3,.md h4{{font-family:Georgia,"Iowan Old Style","Palatino",serif;
-  color:#f0ebe0;line-height:1.3;margin:1.6em 0 .5em}}
- .md h1{{font-size:24px}} .md h2{{font-size:20px;padding-bottom:.25em;border-bottom:1px solid #2a2620}}
- .md h3{{font-size:17px}} .md h4{{font-size:15px;color:#d8d2c6}}
- .md p,.md li{{margin:.6em 0}} .md ul,.md ol{{padding-left:1.5em}}
- .md a{{color:#d97757;text-decoration:none}} .md a:hover{{text-decoration:underline}}
- .md strong{{color:#f0ebe0}}
- .md code{{font:13.5px/1.5 ui-monospace,Menlo,monospace;background:#1f1b16;border:1px solid #2a2620;
-  border-radius:4px;padding:.1em .4em;color:#e0c9a8}}
- .md pre{{background:#0d0b09;border:1px solid #2a2620;border-radius:8px;padding:14px 16px;overflow:auto}}
- .md pre code{{background:none;border:0;padding:0;color:#d8d2c6;font-size:13px;line-height:1.6}}
- .md blockquote{{margin:.8em 0;padding:.1em 1em;border-left:3px solid #2a2620;color:#a89e8e}}
- .md hr{{border:0;border-top:1px solid #2a2620;margin:1.6em 0}}
- .md table{{border-collapse:collapse}} .md th,.md td{{border:1px solid #2a2620;padding:6px 12px}}
- .md th{{background:#1f1b16}}
- @media(max-width:760px){{.md{{padding:18px}}}}</style>
+  color:#f3eee4;line-height:1.25;margin:1.9em 0 .55em;text-wrap:balance}}
+ .md h1{{font-size:26px;letter-spacing:-.015em;margin-top:1.4em}}
+ .md h2{{font-size:20px;letter-spacing:-.01em;padding-bottom:.28em;border-bottom:1px solid #262219}}
+ .md h3{{font-size:17px;font-weight:600;letter-spacing:-.005em}}
+ .md h4{{font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#a89e8e}}
+ .md p{{margin:0 0 1.05em}} .md li{{margin:.3em 0}}
+ .md ul,.md ol{{margin:0 0 1.05em;padding-left:1.4em}}
+ .md li>ul,.md li>ol{{margin:.3em 0}}
+ .md ul{{list-style:none}}
+ .md ul>li{{position:relative}}
+ .md ul>li::before{{content:"";position:absolute;left:-1em;top:.72em;width:4px;height:4px;
+  border-radius:50%;background:#6e6555}}
+ .md ol{{padding-left:1.6em}}
+ .md li::marker{{color:#807767}}
+ .md a{{color:#d97757;text-decoration:none;border-bottom:1px solid #5c3e30}}
+ .md a:hover{{border-bottom-color:#d97757}}
+ .md strong{{color:#f3eee4;font-weight:600}}
+ .md em{{color:#e6e0d4}}
+ .md code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:#211d18;
+  border-radius:4px;padding:.12em .42em;color:#dcb992}}
+ .md pre{{background:#100e0b;border:1px solid #262219;border-radius:8px;padding:15px 18px;
+  margin:0 0 1.05em;overflow:auto}}
+ .md pre code{{background:none;border:0;padding:0;color:#cfc9bc;font-size:13px;line-height:1.65}}
+ .md blockquote{{margin:0 0 1.05em;padding:.1em 0 .1em 1.2em;border-left:2px solid #3a342c;
+  color:#a89e8e;font-style:italic}}
+ .md blockquote p{{margin:0 0 .5em}} .md blockquote :last-child{{margin-bottom:0}}
+ .md hr{{border:0;border-top:1px solid #2a2620;margin:2.4em 0}}
+ .md table{{border-collapse:collapse;width:100%;margin:0 0 1.05em;font-size:15px}}
+ .md th,.md td{{padding:7px 14px 7px 0;text-align:left;border-bottom:1px solid #262219}}
+ .md th{{color:#a89e8e;font-weight:600;border-bottom:1px solid #3a342c}}
+ @media(max-width:760px){{.md{{padding:28px 22px 64px;font-size:16px}}}}</style>
 <article class="md" id=md></article>
 <script>document.getElementById("md").innerHTML={hjs}+marked.parse({bjs})</script>"""
 
@@ -398,14 +418,14 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
  #log .l{padding:1px 0} .la{color:#ece6da} .lt{color:#c98c6d} .lr{color:#6fae7a} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:#b292c4} .le{color:#d6705f} .lm{color:#a89e8e}
  #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
- #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#13110e;border-left:1px solid #2a2620;
+ #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2620;
   display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
  body.drawer-open #backdrop{opacity:1;pointer-events:auto}
  body.drawer-open #drawer{transform:translateX(0)}
  #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#0c0f13}
  #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#d6dde6;border-radius:6px;padding:1px 9px;line-height:1.4}
  #drawer .dclose:hover{border-color:#d97757}
- #drawer iframe{flex:1;width:100%;border:0;background:#13110e}
+ #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span><span id=counts></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
