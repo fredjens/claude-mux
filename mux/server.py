@@ -415,9 +415,10 @@ def _read_web(*parts):
 
 
 # The front-end lives in mux/web/index.html (real HTML/CSS/JS, editable as
-# such); the server reads it at import time and substitutes the provider
-# theme placeholders per request in do_GET.
-PAGE = _read_web("index.html")
+# such); do_GET reads it FRESH on every "/" request and substitutes the
+# provider theme placeholders. It is read per-request (not cached at import)
+# on purpose: the executor rewrites index.html as it works, so a cached copy
+# would serve a stale UI until the server is restarted.
 
 
 class H(BaseHTTPRequestHandler):
@@ -447,7 +448,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             t = theme()
-            page = (PAGE.replace("__ACCENT__", t["accent"])
+            page = (_read_web("index.html")
+                        .replace("__ACCENT__", t["accent"])
                         .replace("__OK__", t["success"])
                         .replace("__SUB__", t["subagent"])
                         .replace("__DANGER__", t["danger"])
