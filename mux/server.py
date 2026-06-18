@@ -85,6 +85,12 @@ def status():
     return {"executing": True, "elapsed": elapsed}
 
 
+def _clip(s):
+    """Collapse whitespace and truncate to one tidy ~90-char line."""
+    s = " ".join(str(s).split())
+    return s[:88] + "…" if len(s) > 90 else s
+
+
 def tool_line(blk):
     """A readable one-liner for a tool_use event: what it's actually doing."""
     name = blk.get("name", "tool")
@@ -99,10 +105,37 @@ def tool_line(blk):
         d = inp.get("description", "")
     else:
         d = ""
-    d = " ".join(str(d).split())
-    if len(d) > 90:
-        d = d[:88] + "…"
+    d = _clip(d)
     return f"→ {name}: {d}" if d else f"→ {name}"
+
+
+def _fmt_dur(ms):
+    """ms → human-readable like `3m51s` or `9s`."""
+    s = int(ms) // 1000
+    return f"{s // 60}m{s % 60}s" if s >= 60 else f"{s}s"
+
+
+def _fmt_tok(n):
+    """Token count with a `k` suffix when ≥1000."""
+    n = int(n)
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def result_summary(ev):
+    """Compact stats line (`Σ …`) from a `result` event's fields; omit any
+    missing segment, never crash."""
+    segs = []
+    if ev.get("duration_ms") is not None:
+        segs.append(_fmt_dur(ev["duration_ms"]))
+    if ev.get("num_turns") is not None:
+        segs.append(f"{ev['num_turns']} turns")
+    usage = ev.get("usage") or {}
+    out_t, in_t = usage.get("output_tokens"), usage.get("input_tokens")
+    if out_t is not None or in_t is not None:
+        segs.append(f"{_fmt_tok(out_t or 0)} out / {_fmt_tok(in_t or 0)} in tok")
+    if ev.get("total_cost_usd") is not None:
+        segs.append(f"${float(ev['total_cost_usd']):.4g}")
+    return "Σ " + " · ".join(segs) if segs else ""
 
 
 def log_lines(limit=300):
@@ -136,6 +169,16 @@ def log_lines(limit=300):
                 if not thinking:
                     out.append("  · thinking…")
                     thinking = True
+            elif sub == "task_started":
+                # Sub-agent (Task tool) kickoff. NOT a cycle boundary.
+                d = ev.get("description") or ev.get("task_type") or "task"
+                out.append("⌖ sub-agent: " + _clip(d))
+                thinking = False
+            elif sub == "task_notification":
+                # Sub-agent outcome (typically status "completed").
+                st = ev.get("status", "done")
+                out.append("⌖ sub-agent " + st + ": " + _clip(ev.get("summary", "")))
+                thinking = False
             # any other system subtype: ignore (no divider, no crash)
         elif t == "assistant":
             for blk in ev.get("message", {}).get("content", []):
@@ -145,8 +188,25 @@ def log_lines(limit=300):
                 elif blk.get("type") == "tool_use":
                     out.append(tool_line(blk))
                     thinking = False
+        elif t == "user":
+            # Tool outcomes. Surface ONLY failures to keep the panel readable;
+            # successful results are implied by the assistant's next move.
+            tur = ev.get("tool_use_result") or {}
+            for blk in ev.get("message", {}).get("content", []):
+                if blk.get("type") != "tool_result":
+                    continue
+                if blk.get("is_error") or tur.get("interrupted"):
+                    msg = blk.get("content") or tur.get("stderr") or tur.get("stdout") or ""
+                    if isinstance(msg, list):
+                        msg = " ".join(b.get("text", "") for b in msg if isinstance(b, dict))
+                    out.append("✗ tool error: " + _clip(msg))
+                    thinking = False
         elif t == "result":
-            out.append("✓ " + str(ev.get("result", "done")).strip())
+            glyph = "✗" if ev.get("is_error") else "✓"
+            out.append(glyph + " " + str(ev.get("result", "done")).strip())
+            stats = result_summary(ev)
+            if stats:
+                out.append(stats)
             thinking = False
     return out or [idle_reason() or "Starting…"]
 
@@ -228,7 +288,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
  @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
- #log .l{padding:1px 0} .la{color:#e6edf3} .lt{color:#56b6c2} .lr{color:#5bb574} .ls{color:#3f4855;margin:8px 0} .lx{color:#9aa7b4}
+ #log .l{padding:1px 0} .la{color:#e6edf3} .lt{color:#56b6c2} .lr{color:#5bb574} .ls{color:#3f4855;margin:8px 0} .lx{color:#9aa7b4} .lg{color:#c678dd} .le{color:#d65a5a} .lm{color:#9aa7b4}
 </style>
 <header><b>CLAUDE MULTIPLEXER</b><span id=repo></span><span class=sp></span>
  <button onclick="planner()">+ planner</button></header>
@@ -283,7 +343,7 @@ async function refresh(){
   `<div class=nm onclick="window.open('/plan?file='+encodeURIComponent('${t.file}'),'_blank')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span> <span class=open>↗</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
  const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
+ E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
  pollStatus()}
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
 refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
