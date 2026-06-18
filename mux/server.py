@@ -309,28 +309,27 @@ def spawn_planner(name=None):
 PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
 <style>
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
- header{padding:10px 16px;background:#13110e;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
- header b{color:#ffffff} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #3a342c;
-  background:#241f1a;color:#e3ddd1;border-radius:6px;padding:3px 9px} button:hover{border-color:#d97757}
+ header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
+ header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
+  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:#d97757;color:#e3ddd1}
  #counts{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
  main{display:grid;grid-template-columns:2fr 3fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
  section{background:#1a1815;overflow:auto;padding:12px 16px} h2{font-size:12px;letter-spacing:.08em;
   text-transform:uppercase;color:#8a8072;margin:0 0 10px;position:sticky;top:0;z-index:1;
-  background:#1a1815;padding:12px 0 10px;margin-top:-12px} .t{padding:8px 10px;border:1px solid #2a2620;
-  border-radius:8px;margin-bottom:8px} .t .st{font-size:11px;font-weight:700;letter-spacing:.05em}
- .RUNNING{color:#5fa8b3}.READY{color:#8fa9bf}.DONE{color:#6fae7a}.FAILED{color:#d6705f}
- .BLOCKED{color:#b292c4}.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
- button.danger{border-color:#5a3030;color:#d99} button.danger:hover{border-color:#d6705f}
- #autobtn.on{border-color:#d97757;color:#d97757;background:#2a1d16}
+  background:#1a1815;padding:12px 0 10px;margin-top:-12px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
+ .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
+ .RUNNING{color:#d97757}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
+ .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
+ button.danger{color:#8a8072} button.danger:hover{border-color:#c5836b;color:#c5836b}
+ #autobtn.on{border-color:#d97757;color:#d97757}
  .run{display:inline-flex;align-items:center;gap:8px;color:#d97757;font-size:12px}
  .shimmer{background:linear-gradient(90deg,#6b5f50 0%,#b09a82 20%,#e8a888 50%,#b09a82 80%,#6b5f50 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
  #nowrunning:empty{display:none}
- #nowrunning .pill{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;
-  background:#13110e;border:1px solid #3a342c;color:#d8d2c6;border-radius:999px;padding:3px 10px;margin:0 0 10px}
- #nowrunning .pill:hover{border-color:#d97757}
+ #nowrunning .pill{display:inline-block;cursor:pointer;font-size:12px;color:#d97757;margin:0 0 10px}
+ #nowrunning .pill:hover{color:#e3ddd1}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
  #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
@@ -413,12 +412,12 @@ async function refresh(){
   `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\\.task\\.md$/,"")}</span></div>`+
-  `${buttons(t)}</div>`).join("")||"<div style='color:#9aa7b4;font-size:12.5px'>No tasks</div>"
+  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8072;font-size:12.5px'>No tasks</div>"
  const order=["RUNNING","READY","BLOCKED","DRAFT","FAILED","DONE"]
  const by={};ts.forEach(t=>by[t.status]=(by[t.status]||0)+1)
  E("counts").innerHTML=order.filter(s=>by[s]).map(s=>`<span class=${s}>${by[s]} ${s.toLowerCase()}</span>`).join("<span class=sep>·</span>")
  const nowt=ts.find(t=>t.executing)||ts.find(t=>t.current&&t.status=="RUNNING")
- E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">📄 ${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
+ E("nowrunning").innerHTML=nowt?`<span class=pill onclick="openPlan('${nowt.file}')" title="open plan">${nowt.file.replace(/\\.task\\.md$/,"")}</span>`:""
  const lg=await (await fetch("/api/log")).json()
  E("log").innerHTML=lg.slice().reverse().map(l=>{const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")
  pollStatus()}
