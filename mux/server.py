@@ -183,36 +183,13 @@ def result_summary(ev):
     return "Σ " + " · ".join(segs) if segs else ""
 
 
-def assistant_texts(limit=300):
-    """Every assistant text-block string from the latest tick log, in order.
-    Index aligns 1:1 with the `n` carried by `log_lines`' click-to-view entries,
-    so `/message?n=` can resolve a log entry back to its full markdown body."""
-    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
-    out = []
-    try:
-        with open(path) as f:
-            raw = f.readlines()[-limit:]
-    except OSError:
-        return out
-    for line in raw:
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if ev.get("type") == "assistant":
-            for blk in ev.get("message", {}).get("content", []):
-                if blk.get("type") == "text" and blk.get("text", "").strip():
-                    out.append(blk["text"].strip())
-    return out
-
-
 def log_lines(limit=300):
     """Render the latest tick log (Claude stream-json) into readable lines.
 
     Returns a list whose items are either plain strings (the readable event
     stream) or, for long/multi-line assistant markdown messages, dicts of the
-    form {"glyph","summary","n"} — a click-to-view entry the UI renders as a
-    link into the markdown drawer instead of dumping raw `##`/`**` into the log."""
+    form {"glyph","md"} — the full markdown body, which the UI renders inline
+    as formatted markdown (via marked.js) instead of as a plain log line."""
     path = os.path.join(REPO, ".mux", "log", "output.jsonl")
     out = []
     try:
@@ -221,7 +198,6 @@ def log_lines(limit=300):
     except OSError:
         return [idle_reason() or "Starting…"]
     cycle = 0
-    tidx = 0          # assistant text-block counter; aligns with assistant_texts()
     thinking = False  # whether the last rendered line is the "thinking…" line
     for line in raw:
         try:
@@ -258,16 +234,15 @@ def log_lines(limit=300):
             for blk in ev.get("message", {}).get("content", []):
                 if blk.get("type") == "text" and blk.get("text", "").strip():
                     txt = blk["text"].strip()
-                    # Long / multi-line markdown messages aren't dumped raw into
-                    # the log (they render as unreadable ## / ** noise). Emit a
-                    # click-to-view entry instead; the full text opens in the
-                    # markdown drawer via `/message?n=`. Short one-liners stay
-                    # inline. `tidx` aligns with assistant_texts().
+                    # Long / multi-line markdown messages render inline as
+                    # formatted markdown (via marked.js, see index.html) so
+                    # headings/bold/lists read properly instead of dumping raw
+                    # ## / ** noise into the log. Short one-liners stay inline as
+                    # a plain event line.
                     if "\n" in txt or len(txt) > 200:
-                        out.append({"glyph": "●", "summary": _clip(txt), "n": tidx})
+                        out.append({"glyph": "●", "md": txt})
                     else:
                         out.append("● " + txt)
-                    tidx += 1
                     thinking = False
                 elif blk.get("type") == "tool_use":
                     out.append(tool_line(blk))
@@ -288,8 +263,8 @@ def log_lines(limit=300):
         elif t == "result":
             glyph = "✗" if ev.get("is_error") else "✓"
             # Keep the log a tidy event stream: collapse the (often multi-line,
-            # markdown) result to a single clipped line. The full formatted text
-            # lives in the drawer via `summary_page()`.
+            # markdown) result to a single clipped line. The worker's final
+            # message already rendered inline above as a markdown block.
             res = str(ev.get("result", "done")).strip()
             out.append(glyph + " " + _clip(res.splitlines()[0] if res else "done"))
             stats = result_summary(ev)
@@ -378,49 +353,6 @@ def plan_page(name):
     title = next((v for k, v in meta if k.lower() == "task"), slug)
     chips = "  ·  ".join(f"<b>{escape(k)}</b> {escape(v)}" for k, v in meta if k.lower() != "task")
     return _md_page(title, chips, "\n".join(rest))
-
-
-def latest_summary():
-    """Return (markdown_text, meta_chips_html) for the most recent output
-    `result` event in output.jsonl — the final assistant summary, plus its
-    `Σ …` cost/turn stats as a meta line. Parse defensively (skip undecodable
-    lines like `log_lines()` does); return a placeholder when the file is
-    missing/unreadable or holds no `result` event."""
-    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
-    last = None
-    try:
-        with open(path) as f:
-            for line in f:
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ev.get("type") == "result":
-                    last = ev
-    except OSError:
-        return "(no output summary yet)", ""
-    if last is None:
-        return "(no output summary yet)", ""
-    text = str(last.get("result", "")).strip() or "(no output summary yet)"
-    return text, escape(result_summary(last))
-
-
-def summary_page():
-    """Render the latest output summary through the shared markdown drawer page."""
-    text, meta = latest_summary()
-    return _md_page("Output summary", meta, text)
-
-
-def message_page(n):
-    """Render a single assistant message (by `assistant_texts` index) through the
-    shared markdown drawer page — the target of a log's click-to-view entry."""
-    texts = assistant_texts()
-    try:
-        i = int(n)
-    except (TypeError, ValueError):
-        i = -1
-    body = texts[i] if 0 <= i < len(texts) else "(message not found)"
-    return _md_page("Output message", "", body)
 
 
 def spawn_channel(name=None):
@@ -521,11 +453,6 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/plan?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, plan_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
-        elif self.path == "/summary":
-            self._send(200, summary_page(), "text/html; charset=utf-8")
-        elif self.path.startswith("/message?"):
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            self._send(200, message_page(q.get("n", [""])[0]), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
             # against WEB and confined to it — normpath collapses any ../ so a
