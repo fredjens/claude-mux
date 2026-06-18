@@ -332,6 +332,50 @@ test_resolve_id() {
   assert_contains "ambiguity is reported" "$OUT" "ambiguous"
 }
 
+# ==========================================================================
+# 11. stop kills an in-flight tick (the backgrounded `claude` child) and only
+#     then clears .mux/tick.lock + .mux/run/tick.pid. Uses a stub `claude` on
+#     PATH so no real model run is needed.
+# ==========================================================================
+test_stop_kills_tick() {
+  header "stop kills the in-flight tick, clearing the lock only after"
+  command -v ps >/dev/null 2>&1 || { no "ps not available to test tick teardown"; return; }
+  local d; d="$(setup_repo)"
+  # Stub `claude` (named so its command line matches kill_tick's `claude` check);
+  # it stays alive in short sleeps so a kill lands within ~0.1s, no orphan.
+  local bin="$d/bin"; mkdir -p "$bin"
+  cat > "$bin/claude" <<'STUB'
+#!/usr/bin/env bash
+i=0; while [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
+STUB
+  chmod +x "$bin/claude"
+
+  # Run ONE tick in the background; it blocks in the stub claude, holding the lock.
+  ( cd "$d" && PATH="$bin:$PATH" bash "$MUX" tick ) >/dev/null 2>&1 &
+  local tickrun=$!
+
+  # Wait for the tick to record its claude pid and take the lock.
+  local pid="" i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$d/.mux/run/tick.pid" ]; then pid="$(cat "$d/.mux/run/tick.pid")"; [ -n "$pid" ] && break; fi
+    sleep 0.1; i=$((i+1))
+  done
+  assert "tick recorded its claude pid" test -n "$pid"
+  assert "tick.lock is held while the tick runs" test -d "$d/.mux/tick.lock"
+  assert "the stubbed claude is alive while the tick runs" sh -c "ps -p $pid >/dev/null 2>&1"
+
+  # Stop it: the loop isn't running here, so this exercises kill_tick directly.
+  ( cd "$d" && PATH="$bin:$PATH" bash "$MUX" stop ) >/dev/null 2>&1
+
+  # The claude child must be gone, and only THEN the lock + pid cleared.
+  i=0; while [ "$i" -lt 50 ] && ps -p "$pid" >/dev/null 2>&1; do sleep 0.1; i=$((i+1)); done
+  assert_eq "stop killed the in-flight claude" "$(ps -p "$pid" -o pid= 2>/dev/null | tr -d ' ')" ""
+  assert "tick.lock removed after the kill" test ! -d "$d/.mux/tick.lock"
+  assert "tick.pid removed after the kill" test ! -f "$d/.mux/run/tick.pid"
+
+  wait "$tickrun" 2>/dev/null
+}
+
 # --- run -------------------------------------------------------------------
 test_add
 test_happy_path
@@ -346,6 +390,7 @@ test_next_fifo
 test_next_depends_on
 test_status_json
 test_resolve_id
+test_stop_kills_tick
 
 printf '\n\033[1m──────────────────────────────────────────\033[0m\n'
 printf '\033[1mTotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

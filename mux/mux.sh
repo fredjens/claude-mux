@@ -397,13 +397,23 @@ to_seconds() { case "$1" in *h) echo $(( ${1%h} * 3600 ));; *m) echo $(( ${1%m} 
 # ONE headless cycle: claude -p (no input channel = unpromptable), output
 # streamed live to a per-tick log the UI can tail. Subscription, not API key.
 cmd_tick() {
-  mkdir -p .mux/log
+  mkdir -p .mux/log .mux/run
   mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
   local log=.mux/log/executor.jsonl        # ONE rolling log — never blanks between tasks
+  # Run claude in the BACKGROUND and record its pid (.mux/run/tick.pid) so a
+  # stopper (kill_tick) can find and halt THIS tick's claude — otherwise the
+  # grandchild outlives a `kill` of the loop and keeps editing the tree. We then
+  # `wait` for that exact child and capture ITS status (the backgrounded
+  # command's, not the script's $?), swallowing it: a killed claude must never
+  # abort the loop (the old `|| true` semantics, preserved).
   env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(executor_cycle)" \
     --dangerously-skip-permissions \
     --verbose --output-format stream-json \
-    --append-system-prompt "$(cat "$PROMPTS_DIR/EXECUTOR.md")" >> "$log" 2>&1 || true
+    --append-system-prompt "$(cat "$PROMPTS_DIR/EXECUTOR.md")" >> "$log" 2>&1 &
+  local cpid=$!
+  echo "$cpid" > .mux/run/tick.pid
+  wait "$cpid" 2>/dev/null || true
+  rm -f .mux/run/tick.pid
   rmdir .mux/tick.lock 2>/dev/null || true
   [ "$(wc -l < "$log" 2>/dev/null || echo 0)" -gt 4000 ] && { tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; } || true
 }
@@ -420,8 +430,32 @@ cmd_executor() {
   done
 }
 
+# Halt THIS repo's in-flight executor tick: the `claude -p` child cmd_tick
+# backgrounded (pid in .mux/run/tick.pid). The lock is cleared ONLY after that
+# claude is confirmed gone — never before — so the lock can't disappear while
+# the model is still editing the working tree. Defensive like cmd_stop: act only
+# if the recorded pid is alive AND still a claude process, so a recycled pid
+# (some unrelated process now holding that number) is never killed.
+kill_tick() {
+  local pid; pid="$(cat .mux/run/tick.pid 2>/dev/null || true)"
+  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q 'claude'; then
+    kill "$pid" 2>/dev/null || true     # ask it to stop...
+    local i=0                            # ...escalate to -9 only if it lingers
+    while ps -p "$pid" -o command= 2>/dev/null | grep -q 'claude'; do
+      i=$((i+1))
+      [ "$i" -eq 10 ] && kill -9 "$pid" 2>/dev/null || true   # ~1s grace, then SIGKILL
+      [ "$i" -ge 30 ] && break                                 # give up after ~3s
+      sleep 0.1
+    done
+  fi
+  # Only now that the tick's claude is gone do we drop its pid + the lock.
+  rm -f .mux/run/tick.pid
+  rmdir .mux/tick.lock 2>/dev/null || true
+}
+
 # Stop the executor loop + web server recorded for THIS repo (only ours — we
-# verify the pid is still a mux/python process, never kill a recycled pid).
+# verify the pid is still a mux/python process, never kill a recycled pid). The
+# loop dies FIRST so it can't spawn a fresh tick, THEN we halt any in-flight one.
 cmd_stop() {
   local run=.mux/run pid name stopped=0
   for name in web executor; do
@@ -431,7 +465,7 @@ cmd_stop() {
     fi
     rm -f "$run/$name.pid"
   done
-  rmdir .mux/tick.lock 2>/dev/null || true
+  kill_tick     # halt the in-flight tick, then (inside) clear the lock
   [ "$stopped" -eq 1 ] || echo "nothing to stop"
 }
 
@@ -444,7 +478,11 @@ cmd_web() {
   local epid=$!; echo "$epid" > .mux/run/executor.pid
   MUX_REPO="$REPO_ROOT" MUX_BIN="$SELF_DIR/mux.sh" MUX_PORT="$port" python3 "$SELF_DIR/server.py" &
   local wpid=$!; echo "$wpid" > .mux/run/web.pid
-  trap 'kill "$epid" "$wpid" 2>/dev/null; rm -f "$REPO_ROOT"/.mux/run/*.pid; rmdir "$REPO_ROOT/.mux/tick.lock" 2>/dev/null' EXIT INT TERM
+  # Kill the loop + server first (so no fresh tick spawns), then halt any
+  # in-flight tick (kill_tick drops tick.pid + the lock once its claude is gone),
+  # then sweep the remaining pid files. kill_tick MUST run before the *.pid rm,
+  # or the rm would delete tick.pid out from under it.
+  trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM
   echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C stops UI + executor; or run: mux stop)"
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
   if [ -z "${MUX_NO_OPEN:-}" ]; then
