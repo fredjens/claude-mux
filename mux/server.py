@@ -374,9 +374,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
   background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:#d97757;color:#e3ddd1}
  #counts{color:#8a8072;font-size:12px;white-space:nowrap} #counts .sep{color:#3a342c;margin:0 5px}
  main{display:grid;grid-template-columns:2fr 3fr;gap:1px;background:#2a2620;height:calc(100vh - 49px)}
- section{background:#1a1815;overflow:auto;padding:12px 16px} h2{font-size:12px;letter-spacing:.08em;
-  text-transform:uppercase;color:#8a8072;margin:0 0 10px;position:sticky;top:0;z-index:1;
-  background:#1a1815;padding:12px 0 10px;margin-top:-12px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
+ section{background:#1a1815;overflow:auto;padding:12px 16px} .t{padding:7px 0;border-bottom:1px solid #221f1a}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
  .RUNNING{color:#d97757}.FAILED{color:#c5836b}.BLOCKED{color:#c5836b}
  .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
@@ -413,8 +411,8 @@ PAGE = """<!doctype html><meta charset=utf-8><title>mux</title>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
  <button onclick="planner()">+ planner</button></header>
 <main>
- <section><h2>Tasks</h2><div id=tasks></div></section>
- <section><h2>Executor</h2><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
+ <section><div id=tasks></div></section>
+ <section><div id=summarybar><span class=slink onclick="openSummary()" title="open the executor's latest summary">📄 summary</span></div><div id=nowrunning></div><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
