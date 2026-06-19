@@ -40,8 +40,7 @@
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:var(--mux-text-muted)}
  .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
  .READY,.DONE,.DRAFT{color:var(--mux-text-muted)} .t .nm{color:var(--mux-text);margin:2px 0;cursor:pointer}
- .t .st .runword.live{background:linear-gradient(100deg,var(--accent) 35%,var(--mux-text) 50%,var(--accent) 65%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:runshimmer 2.6s linear infinite}
- @keyframes runshimmer{0%{background-position:120% 0}100%{background-position:-120% 0}}
+ .t .st .runword.live{background:linear-gradient(90deg,var(--mux-dim) 0%,var(--mux-text-dim) 20%,var(--mux-bright) 50%,var(--mux-text-dim) 80%,var(--mux-dim) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:shimmer 1.6s linear infinite}
  .t .st .nextlbl{color:var(--accent)}
  /* "awaiting you": the queue's only call-to-action — a task is parked on YOUR
     answer. Pulled out of the muted status text into an accent pill that pulses
