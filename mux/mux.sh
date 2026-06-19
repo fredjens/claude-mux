@@ -2,35 +2,46 @@
 # mux.sh — the VERB LAYER: the only sanctioned way to change a task's state.
 #
 # Every legal move in the workflow is one subcommand here. Nothing else should
-# hand-edit a task's STATUS — you, a hook, the executor tick, or a future UI all
+# hand-edit a task's STATUS — you, a hook, the output tick, or a future UI all
 # go through these verbs, so the rules (a DRAFT can't commit, a RUNNING task
 # can't be released, etc.) live in ONE place and illegal moves are refused.
 #
 # Source of truth stays the files in .mux/tasks/*.task.md. These verbs only do
-# validated edits to those files; git (committing on `ok`) is the executor's job.
+# validated edits to those files; git (committing on `ok`) is the output's job.
 #
-#   mux planner  [name]         open a planner (reads repo, writes only .mux/)
-#   mux start    [port]         open the web view + auto-start the executor (default :8770)
+#   mux channel  [name]         open a channel (reads repo, writes only .mux/)
+#   mux start    [port]         open the web view + auto-start the output (default :8770)
 #   mux web      [port]         alias of `mux start`
-#   mux stop                    stop this repo's web UI + executor loop
-#   mux executor [interval]     headless executor loop on its own (web starts this for you)
+#   mux stop                    stop this repo's web UI + output loop
+#   mux output [interval]     headless output loop on its own (web starts this for you)
 #   mux tick                    run ONE headless cycle (for launchd/cron)
 #   mux add  <slug> [goal...]   create a DRAFT task
 #   mux ls | status             the board
 #   mux status --json           machine-readable board (for fzf/Raycast/UIs)
 #   mux board                   interactive board (fzf): preview + verb keys
-#   mux next                    the one task the executor should run now
+#   mux next                    the one task the output should run now
 #   mux show     <id>           print a task file
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
-#   mux claim    <id>           READY  -> RUNNING (executor claims it; not for you)
+#   mux release-all             every DRAFT -> READY (auto mode; no-op if none)
+#   mux claim    <id>           READY  -> RUNNING (output claims it; not for you)
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
 #   mux ok       [note...]      approve RUNNING: commit the changes -> DONE
+#   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
-#   mux fail     <id> <why...>  RUNNING-> FAILED  (executor: discard + reason)
+#   mux fail     <id> <why...>  RUNNING-> FAILED  (output: discard + reason)
+#   mux delete   <id>           remove a FAILED task file (clear it off the board)
 #   mux help
 #
 # <id> is any unique substring of a task's filename (usually its slug).
+#
+# Recovery — a tick killed mid-cycle (e.g. `mux stop` while it was working):
+#   its RUNNING task is flagged "(interrupted — revert & re-release)" in
+#   `mux status` because the working tree holds PARTIAL, half-finished edits.
+#   Do NOT `mux ok` it (that would commit incomplete work). Instead:
+#     mux revert            discard the partial edits → FAILED, clean tree again
+#   then re-release it to run fresh: re-add the task (`mux add` + `mux release`)
+#   so the output retries it from scratch — never `mux ok` an interrupted task.
 
 set -euo pipefail
 
@@ -55,6 +66,10 @@ mkdir -p .mux/tasks
 shopt -s nullglob
 
 TASKS=.mux/tasks
+# Append-only ledger of approved (committed, then deleted) task filenames, so a
+# `# Depends-on:` pointing at a deleted task still resolves. Lives under .mux,
+# so it's never committed (cmd_ok does `git reset -q -- .mux`).
+DONE_LOG=.mux/done.log
 
 # --- helpers ---------------------------------------------------------------
 
@@ -87,9 +102,16 @@ json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # Is the RUNNING task approved? / dependency of a task and its done-state.
 task_dep()   { grep -m1 -i '^# Depends-on:' "$1" | sed 's/.*Depends-on:[[:space:]]*//' | awk '{print $1}' || true; }
+task_session() { grep -m1 -i '^# Session:' "$1" | sed 's/.*Session:[[:space:]]*//' | awk '{print $1}' || true; }
 
-# Value of a single-token header field (Branch, Base, …); '' if absent.
-task_field() { grep -m1 -i "^# *$2:" "$1" 2>/dev/null | sed 's/.*: *//' | awk '{print $1}' || true; }
+# Is a dependency satisfied? $1 = the dependency's task filename. Approved tasks
+# are DELETED (their file is gone), so the real check is the done.log ledger; the
+# first clause is belt-and-suspenders for a lingering DONE file.
+dep_is_done() {
+  [ -f "$TASKS/$1" ] && [ "$(task_status "$TASKS/$1")" = DONE ] && return 0
+  [ -f "$DONE_LOG" ] && grep -qxF -- "$1" <(cut -f1 "$DONE_LOG") && return 0
+  return 1
+}
 
 # True when the working tree has no uncommitted changes — IGNORING mux's own
 # .mux/ queue (it's metadata, never "work"), whether or not it's gitignored.
@@ -105,11 +127,25 @@ git_clean() {
 }
 
 # Build a titled commit message from a task file (+ optional approval note).
+# The subject is `slug: <first Goal line>`; the body carries the REST of the
+# Goal block (a short summary of the plan, stopping at the next ## heading),
+# then `task: <filename>`, then the optional approve note. Goal is meant to be
+# short, so this stays tidy — Details is never included.
 commit_message() {
-  local f="$1" note="${2:-}" slug goal
+  local f="$1" note="${2:-}" slug goal_first goal_rest
   slug="$(grep -m1 -i '^# Task:' "$f" | sed 's/^# *[Tt]ask:[[:space:]]*//')"
-  goal="$(awk '/^## *Goal/{g=1;next} g&&NF{print;exit}' "$f")"
-  printf '%s: %s\n\ntask: %s' "${slug:-task}" "${goal:-see task file}" "${f##*/}"
+  # The Goal block: every line between "## Goal" and the next "##" heading,
+  # dropping leading/trailing blank lines. The first such line is the subject;
+  # the rest is the body summary. Details is deliberately never included.
+  goal_first="$(awk '/^## *Goal/{g=1;next} /^##/{g=0} g&&NF{print;exit}' "$f")"
+  goal_rest="$(awk '
+    /^## *Goal/{g=1;next} /^##/{g=0; next}
+    g{ if(!seen){ if(NF){seen=1}; next } if(NF){last=NR} lines[NR]=$0 }
+    END{ for(i=1;i<=last;i++) if(i in lines) print lines[i] }
+  ' "$f")"
+  printf '%s: %s\n' "${slug:-task}" "${goal_first:-see task file}"
+  [ -n "$goal_rest" ] && printf '\n%s\n' "$goal_rest"
+  printf '\ntask: %s' "${f##*/}"
   [ -n "$note" ] && printf '\n\n%s' "$note"
   return 0
 }
@@ -118,7 +154,7 @@ commit_message() {
 resolve_id() {
   local q="${1%.task.md}"                       # tolerate a full filename
   local matches=( "$TASKS"/*"$q"*.task.md )
-  [ ${#matches[@]} -gt 0 ] || die "no task matches '$1'"
+  [ ${#matches[@]} -gt 0 ] || die "no task matches '$1' — if it was approved, its file is gone; try: git log --grep $q"
   if [ ${#matches[@]} -gt 1 ]; then
     { echo "✗ '$q' is ambiguous — matches:"; printf '   %s\n' "${matches[@]##*/}"; } >&2
     exit 1
@@ -135,6 +171,37 @@ running_task() {
   [ "$n" -gt 0 ] || die "no task is RUNNING — nothing to approve or revise"
   [ "$n" -eq 1 ] || die "more than one task is RUNNING (invariant broken); fix the queue by hand"
   printf '%s\n' "$found"
+}
+
+# Annotate the single RUNNING task as interrupted mid-tick (called only when a
+# live tick is actually killed). Like running_task but QUIET: a stop with no
+# RUNNING task — or, defensively, more than one — is normal here, so do nothing
+# and never die. The marker is an annotation; STATUS stays RUNNING (the
+# work-in-tree invariant is unchanged). Idempotent — never doubles the line.
+mark_interrupted() {
+  local f found="" n=0
+  for f in "$TASKS"/*.task.md; do
+    if [ "$(task_status "$f")" = RUNNING ]; then found="$f"; n=$((n+1)); fi
+  done
+  [ "$n" -eq 1 ] || return 0
+  grep -qi '^# Interrupted:' "$found" || append_block "$found" "# Interrupted: $(stamp)"
+}
+
+# Pin a tick's claude session id onto the single RUNNING task, so a stuck task
+# can be resumed interactively later (the rolling log tail won't still hold it).
+# Same defensive stance as mark_interrupted: act only when exactly one task is
+# RUNNING, never error. Unlike mark_interrupted, REPLACE any prior `# Session:`
+# line — a task can be ticked more than once; keep only the latest id. The id is
+# validated to look like a session id so a stray log line can't poison the file.
+record_session() {
+  local id="$1" f found="" n=0
+  printf '%s' "$id" | grep -Eqi '^[0-9a-f-]{36}$' || return 0
+  for f in "$TASKS"/*.task.md; do
+    if [ "$(task_status "$f")" = RUNNING ]; then found="$f"; n=$((n+1)); fi
+  done
+  [ "$n" -eq 1 ] || return 0
+  grep -vi '^# Session:' "$found" > "$found.tmp" && mv "$found.tmp" "$found"
+  append_block "$found" "# Session: $id"
 }
 
 # Refuse an illegal transition with a clear message.
@@ -172,6 +239,18 @@ cmd_release() {
   echo "→ ${f##*/}  DRAFT → READY"
 }
 
+# Release EVERY DRAFT task to READY in one shot — what auto mode calls on a timer.
+# Leaves all other statuses untouched, and is a clean no-op (exit 0) when there
+# are no DRAFTs, so a UI calling it on a poll never sees a spurious error.
+cmd_release_all() {
+  local f
+  for f in "$TASKS"/*.task.md; do
+    [ "$(task_status "$f")" = DRAFT ] || continue
+    set_status "$f" READY
+    echo "→ ${f##*/}  DRAFT → READY"
+  done
+}
+
 cmd_block() {
   [ $# -ge 2 ] || die "usage: mux block <id> <question...>"
   local f; f="$(resolve_id "$1")"; shift
@@ -202,7 +281,7 @@ cmd_claim() {
 }
 
 # Throw away all uncommitted work EXCEPT the .mux queue. Safe because the
-# executor always starts from a clean tree — anything dirty is this task's work.
+# output always starts from a clean tree — anything dirty is this task's work.
 discard_changes() {
   git checkout -q -- . 2>/dev/null || true
   git clean -fdq -e .mux 2>/dev/null || true
@@ -218,7 +297,7 @@ cmd_fail() {
   echo "✗ ${f##*/}  RUNNING → FAILED  (changes discarded)"
 }
 
-# Human rejects the finished work: discard the executor's changes, mark FAILED.
+# Human rejects the finished work: discard the output's changes, mark FAILED.
 cmd_revert() {
   local f; f="$(running_task)"
   discard_changes
@@ -227,17 +306,35 @@ cmd_revert() {
   echo "↩ ${f##*/} reverted — changes discarded, marked FAILED"
 }
 
+# Permanently remove a dead task file so it stops cluttering the board. Only a
+# FAILED task may be deleted — its changes are already discarded, so there is
+# nothing left to lose; any other state must go through the lifecycle first.
+cmd_delete() {
+  [ $# -ge 1 ] || die "usage: mux delete <id>"
+  local f; f="$(resolve_id "$1")"
+  require_status "$f" FAILED
+  rm -f "$f"
+  echo "🗑 ${f##*/} deleted"
+}
+
 # Approve the RUNNING task: commit its working-tree changes as ONE commit on the
 # CURRENT branch, then mark DONE. No branches to track — commits wherever you are.
 cmd_ok() {
   local f; f="$(running_task)"
   git_clean && die "no file changes to commit for ${f##*/} — ask for changes, or 'mux fail'"
-  git add -A -- . ':!.mux' || die "git add failed"
+  # Stage everything, then unstage the queue so it's never committed. (A pathspec
+  # exclude like ':!.mux' instead would FAIL when .mux is gitignored; this works
+  # whether .mux is ignored — then the reset is a harmless no-op — or not.)
+  git add -A || die "git add failed"
+  git reset -q -- .mux 2>/dev/null || true
   git commit -q -m "$(commit_message "$f" "$*")" || die "git commit failed"
   local sha br; sha="$(git rev-parse --short HEAD)"; br="$(git branch --show-current 2>/dev/null || echo '?')"
-  set_status "$f" DONE
-  append_block "$f" "# Done: $(stamp) · $sha on $br"
-  echo "✓ ${f##*/} → DONE   ($sha on $br)"
+  # The commit is now the permanent record. Note it in the done.log ledger (so a
+  # `# Depends-on:` on this task still resolves once its file is gone), then
+  # delete the task file — .mux/tasks/ only ever holds live, not-yet-done work.
+  printf '%s\t%s\t%s\n' "${f##*/}" "$sha" "$(stamp)" >> "$DONE_LOG"
+  rm -f "$f"
+  echo "✓ ${f##*/} committed ($sha on $br) — task file removed"
 }
 
 cmd_changes() {
@@ -245,7 +342,7 @@ cmd_changes() {
   local f; f="$(running_task)"
   append_block "$f" "## Change request ($(stamp))
 $*"
-  echo "↻ ${f##*/} — revision requested; stays RUNNING, executor revises next tick"
+  echo "↻ ${f##*/} — revision requested; stays RUNNING, output revises next tick"
 }
 
 cmd_show() {
@@ -256,10 +353,13 @@ cmd_show() {
 cmd_status() {
   [ "${1:-}" = "--json" ] && { cmd_status_json; return; }
   local tasks=( "$TASKS"/*.task.md )
-  [ ${#tasks[@]} -gt 0 ] || { echo "no tasks yet — open a planner:  mux planner"; return 0; }
+  [ ${#tasks[@]} -gt 0 ] || { echo "no tasks yet — open a channel:  mux channel"; return 0; }
   printf '%-3s %-7s %s\n' "" "STATUS" "TASK"
   printf '%-3s %-7s %s\n' "" "------" "----"
   local f status marker dep depstatus note next_marked=0
+  # The interrupted marker is only LIVE while the tree is dirty (a resumed,
+  # finished task has a clean tree, so the stale annotation is ignored).
+  local dirty=false; git_clean || dirty=true
   for f in "${tasks[@]}"; do          # filename sort == FIFO
     status="$(task_status "$f")"
     marker="   "
@@ -267,27 +367,32 @@ cmd_status() {
     elif [ "$status" = READY ] && [ "$next_marked" -eq 0 ]; then marker=" > "; next_marked=1
     fi
     note=""
-    grep -qi '^## Approved' "$f" && note=" (approved)"
+    if [ "$status" = RUNNING ] && [ "$dirty" = true ] && grep -qi '^# Interrupted:' "$f"; then
+      note=" (interrupted — revert & re-release)"
+    fi
+    grep -qi '^## Approved' "$f" && note="$note (approved)"
     [ "$status" = BLOCKED ] && note=" (awaiting answer)"
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
       depstatus=pending
-      [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ] && depstatus=done
+      dep_is_done "$dep" && depstatus=done
       note="$note (depends: ${dep%%.task.md} [$depstatus])"
     fi
     printf '%s %-7s %s%s\n' "$marker" "$status" "${f##*/}" "$note"
   done
   echo
   echo " *  = RUNNING / awaiting you (loop holds this task; BLOCKED ones don't gate)"
-  echo " >  = next READY task the executor will pick"
+  echo " >  = next READY task the output will pick"
 }
 
 # The board as JSON — one source of truth for every UI (fzf, Raycast, web...).
 cmd_status_json() {
   local tasks=( "$TASKS"/*.task.md )
   [ ${#tasks[@]} -gt 0 ] || { printf '[]\n'; return 0; }
-  local f status dep depstatus approved awaiting current next exec_now next_marked=0 sep=""
+  local f status dep depstatus approved awaiting current next exec_now interrupted session next_marked=0 sep=""
   local executing=false; [ -d .mux/tick.lock ] && executing=true
+  # Interrupted is live only while the tree is dirty (see cmd_status).
+  local dirty=false; git_clean || dirty=true
   printf '['
   for f in "${tasks[@]}"; do
     status="$(task_status "$f")"
@@ -296,17 +401,20 @@ cmd_status_json() {
     elif [ "$status" = READY ] && [ "$next_marked" -eq 0 ]; then next=true; next_marked=1
     fi
     exec_now=false; [ "$status" = RUNNING ] && [ "$executing" = true ] && exec_now=true
+    interrupted=false; [ "$status" = RUNNING ] && [ "$dirty" = true ] && grep -qi '^# Interrupted:' "$f" && interrupted=true
     approved=false; grep -qi '^## Approved' "$f" && approved=true
     awaiting=false; [ "$status" = BLOCKED ] && awaiting=true
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
-      if [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ]; then depstatus='"done"'; else depstatus='"pending"'; fi
+      if dep_is_done "$dep"; then depstatus='"done"'; else depstatus='"pending"'; fi
       dep="\"$(json_escape "$dep")\""
     else
       dep=null; depstatus=null
     fi
-    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s}' \
-      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$approved" "$awaiting" "$dep" "$depstatus"
+    session="$(task_session "$f")"
+    if [ -n "$session" ]; then session="\"$(json_escape "$session")\""; else session=null; fi
+    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s,"session":%s}' \
+      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus" "$session"
     sep=","
   done
   printf ']\n'
@@ -318,8 +426,8 @@ cmd_list() {
   for f in "$TASKS"/*.task.md; do printf '%-7s %s\n' "$(task_status "$f")" "${f##*/}"; done
 }
 
-# The ONE task the executor should act on this cycle — prints its filename, or
-# nothing. Deterministic selection lives here (not in the executor's judgement):
+# The ONE task the output should act on this cycle — prints its filename, or
+# nothing. Deterministic selection lives here (not in the output's judgement):
 #   0. if the tree is dirty, a finished task is awaiting `mux ok` → idle (nothing)
 #   1. a RUNNING task wins (resume it) — enforces one-at-a-time
 #   2. else the FIFO-first READY task whose # Depends-on: is DONE (or absent)
@@ -334,7 +442,7 @@ cmd_next() {
     [ "$(task_status "$f")" = READY ] || continue
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
-      [ -f "$TASKS/$dep" ] && [ "$(task_status "$TASKS/$dep")" = DONE ] || continue
+      dep_is_done "$dep" || continue
     fi
     printf '%s\n' "${f##*/}"; return 0
   done
@@ -356,12 +464,12 @@ cmd_board() {
 
 # --- session launchers (the only verbs that start a Claude session) ---------
 
-cmd_planner() {
-  local name="${1:-planner}"
-  echo "◆ PLANNER (producer): ${name}"
+cmd_channel() {
+  local name="${1:-channel}"
+  echo "◆ CHANNEL (producer): ${name}"
   echo "  reads your code; may write ONLY under .mux/ — cannot touch source"
   echo "  writes tasks to .mux/tasks/<timestamp>-<slug>.task.md as DRAFT"
-  echo "  YOU flip them to READY (mux release <id>); executor runs READY oldest-first"
+  echo "  YOU flip them to READY (mux release <id>); output runs READY oldest-first"
   echo "  see the queue any time:  mux status"
   echo
   # Per-session scoped permissions: ignore project settings so a broad project
@@ -370,15 +478,15 @@ cmd_planner() {
   # NOTE: pattern is .mux/** with NO leading ./ — Claude Code normalizes paths
   # to project-root-relative, and a "./" prefix makes the rule fail to match.
   exec claude \
-    -n "planner:${name}" \
+    -n "channel:${name}" \
     --setting-sources user \
     --permission-mode default \
     --allowedTools 'Read' 'Glob' 'Grep' 'Bash' 'Write(.mux/**)' 'Edit(.mux/**)' \
-    --append-system-prompt "$(sed "s/__NAME__/${name}/g" "$PROMPTS_DIR/PLANNER.md")"
+    --append-system-prompt "$(sed "s/__NAME__/${name}/g" "$PROMPTS_DIR/CHANNEL.md")"
 }
 
 # What Claude is told to do each headless cycle (one task unit, then exit).
-executor_cycle() {
+output_cycle() {
   cat <<'CYCLE'
 You are a headless worker with NO memory between runs. Run `mux next` (bash): it prints the ONE task file to work on, or nothing.
 - If it prints nothing, do NOTHING and stop.
@@ -395,41 +503,81 @@ to_seconds() { case "$1" in *h) echo $(( ${1%h} * 3600 ));; *m) echo $(( ${1%m} 
 # ONE headless cycle: claude -p (no input channel = unpromptable), output
 # streamed live to a per-tick log the UI can tail. Subscription, not API key.
 cmd_tick() {
-  mkdir -p .mux/log
+  mkdir -p .mux/log .mux/run
   mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
-  local log=.mux/log/executor.jsonl        # ONE rolling log — never blanks between tasks
-  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(executor_cycle)" \
+  local log=.mux/log/output.jsonl        # ONE rolling log — never blanks between tasks
+  # Run claude in the BACKGROUND and record its pid (.mux/run/tick.pid) so a
+  # stopper (kill_tick) can find and halt THIS tick's claude — otherwise the
+  # grandchild outlives a `kill` of the loop and keeps editing the tree. We then
+  # `wait` for that exact child and capture ITS status (the backgrounded
+  # command's, not the script's $?), swallowing it: a killed claude must never
+  # abort the loop (the old `|| true` semantics, preserved).
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(output_cycle)" \
     --dangerously-skip-permissions \
     --verbose --output-format stream-json \
-    --append-system-prompt "$(cat "$PROMPTS_DIR/EXECUTOR.md")" >> "$log" 2>&1 || true
+    --append-system-prompt "$(cat "$PROMPTS_DIR/OUTPUT.md")" >> "$log" 2>&1 &
+  local cpid=$!
+  echo "$cpid" > .mux/run/tick.pid
+  wait "$cpid" 2>/dev/null || true
+  rm -f .mux/run/tick.pid
+  # Pin the session id this tick used onto its RUNNING task (last one wins) so a
+  # stuck task can be resumed interactively. Do this BEFORE dropping the lock.
+  record_session "$(grep -o '"session_id":"[0-9a-f-]\{36\}"' "$log" 2>/dev/null | tail -n1 | sed 's/.*"session_id":"\(.*\)"/\1/')"
   rmdir .mux/tick.lock 2>/dev/null || true
   [ "$(wc -l < "$log" 2>/dev/null || echo 0)" -gt 4000 ] && { tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; } || true
 }
 
 # Headless loop: poll for work; spend a model run ONLY when a task is runnable.
 # No session, nothing to reprompt. Usually started for you by `mux web`.
-cmd_executor() {
+cmd_output() {
   local human="${1:-10s}" secs; secs="$(to_seconds "$human")"
   rmdir .mux/tick.lock 2>/dev/null || true     # clear a stale lock from a killed tick
-  echo "▶ executor — headless; polls for work every ${human}, runs a cycle only when there is some."
+  echo "▶ output — headless; polls for work every ${human}, runs a cycle only when there is some."
   while :; do
     [ -n "$(cmd_next)" ] && cmd_tick
     sleep "$secs"
   done
 }
 
-# Stop the executor loop + web server recorded for THIS repo (only ours — we
-# verify the pid is still a mux/python process, never kill a recycled pid).
+# Halt THIS repo's in-flight output tick: the `claude -p` child cmd_tick
+# backgrounded (pid in .mux/run/tick.pid). The lock is cleared ONLY after that
+# claude is confirmed gone — never before — so the lock can't disappear while
+# the model is still editing the working tree. Defensive like cmd_stop: act only
+# if the recorded pid is alive AND still a claude process, so a recycled pid
+# (some unrelated process now holding that number) is never killed.
+kill_tick() {
+  local pid; pid="$(cat .mux/run/tick.pid 2>/dev/null || true)"
+  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q 'claude'; then
+    kill "$pid" 2>/dev/null || true     # ask it to stop...
+    local i=0                            # ...escalate to -9 only if it lingers
+    while ps -p "$pid" -o command= 2>/dev/null | grep -q 'claude'; do
+      i=$((i+1))
+      [ "$i" -eq 10 ] && kill -9 "$pid" 2>/dev/null || true   # ~1s grace, then SIGKILL
+      [ "$i" -ge 30 ] && break                                 # give up after ~3s
+      sleep 0.1
+    done
+    # The tick was LIVE — its RUNNING task holds PARTIAL, half-finished edits.
+    # Flag it so it can't be mistaken for finished work awaiting `mux ok`.
+    mark_interrupted
+  fi
+  # Only now that the tick's claude is gone do we drop its pid + the lock.
+  rm -f .mux/run/tick.pid
+  rmdir .mux/tick.lock 2>/dev/null || true
+}
+
+# Stop the output loop + web server recorded for THIS repo (only ours — we
+# verify the pid is still a mux/python process, never kill a recycled pid). The
+# loop dies FIRST so it can't spawn a fresh tick, THEN we halt any in-flight one.
 cmd_stop() {
   local run=.mux/run pid name stopped=0
-  for name in web executor; do
+  for name in web output; do
     pid="$(cat "$run/$name.pid" 2>/dev/null || true)"
     if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -qE 'server\.py|mux\.sh'; then
       kill "$pid" 2>/dev/null && { echo "■ stopped $name (pid $pid)"; stopped=1; }
     fi
     rm -f "$run/$name.pid"
   done
-  rmdir .mux/tick.lock 2>/dev/null || true
+  kill_tick     # halt the in-flight tick, then (inside) clear the lock
   [ "$stopped" -eq 1 ] || echo "nothing to stop"
 }
 
@@ -438,12 +586,19 @@ cmd_web() {
   local port="${1:-8770}"   # NOT 7000 — macOS AirPlay Receiver squats on 7000
   mkdir -p .mux/log .mux/run
   cmd_stop >/dev/null 2>&1                 # clean up any previous mux web for this repo
-  cmd_executor "${2:-10s}" >> .mux/log/executor.loop 2>&1 &
-  local epid=$!; echo "$epid" > .mux/run/executor.pid
+  cmd_output "${2:-10s}" >> .mux/log/output.loop 2>&1 &
+  local epid=$!; echo "$epid" > .mux/run/output.pid
   MUX_REPO="$REPO_ROOT" MUX_BIN="$SELF_DIR/mux.sh" MUX_PORT="$port" python3 "$SELF_DIR/server.py" &
   local wpid=$!; echo "$wpid" > .mux/run/web.pid
-  trap 'kill "$epid" "$wpid" 2>/dev/null; rm -f "$REPO_ROOT"/.mux/run/*.pid; rmdir "$REPO_ROOT/.mux/tick.lock" 2>/dev/null' EXIT INT TERM
-  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C stops UI + executor; or run: mux stop)"
+  # Kill the loop + server first (so no fresh tick spawns), then halt any
+  # in-flight tick (kill_tick drops tick.pid + the lock once its claude is gone),
+  # then sweep the remaining pid files. kill_tick MUST run before the *.pid rm,
+  # or the rm would delete tick.pid out from under it.
+  # HUP is in the list so closing the terminal (which sends SIGHUP) tears the
+  # whole tree down too — without it the script orphaned to PID 1 and its
+  # output + in-flight claude kept running after the window was gone.
+  trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM HUP
+  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C or closing this window stops UI + output; or run: mux stop)"
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
   if [ -z "${MUX_NO_OPEN:-}" ]; then
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
@@ -460,12 +615,14 @@ cmd="${1:-status}"; shift || true
 case "$cmd" in
   add)            cmd_add "$@" ;;
   release)        cmd_release "$@" ;;
+  release-all)    cmd_release_all "$@" ;;
   claim)          cmd_claim "$@" ;;
   start|web)      cmd_web "$@" ;;
   block)          cmd_block "$@" ;;
   resolve)        cmd_resolve "$@" ;;
   fail)           cmd_fail "$@" ;;
   revert)         cmd_revert "$@" ;;
+  delete|rm)      cmd_delete "$@" ;;
   ok)             cmd_ok "$@" ;;
   changes)        cmd_changes "$@" ;;
   show)           cmd_show "$@" ;;
@@ -473,8 +630,8 @@ case "$cmd" in
   board)          cmd_board "$@" ;;
   next)           cmd_next "$@" ;;
   _list)          cmd_list "$@" ;;
-  planner)        cmd_planner "$@" ;;
-  executor)       cmd_executor "$@" ;;
+  channel)        cmd_channel "$@" ;;
+  output)       cmd_output "$@" ;;
   tick)           cmd_tick "$@" ;;
   stop)           cmd_stop "$@" ;;
   help|-h|--help) cmd_help ;;

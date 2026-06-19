@@ -1,0 +1,194 @@
+<!doctype html><meta charset=utf-8><title>mux</title>
+<style>
+ :root{--accent:__ACCENT__;--ok:__OK__;--sub:__SUB__;--danger:__DANGER__}
+ body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
+ header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
+ header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
+  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
+ #provider{color:#8a8072;white-space:nowrap}
+ main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
+ /* Narrow viewport: stack Queue above Output and let the page scroll
+    instead of squeezing two columns. Drop the fixed viewport height so the
+    sections flow. */
+ @media(max-width:720px){
+  main{grid-template-columns:1fr;height:auto}
+  section{min-height:50vh}
+ }
+ section{background:#1a1815;overflow:auto;padding:12px 16px} section+section{border-left:1px solid #2a2620} .t{padding:7px 0;border-bottom:1px solid #221f1a}
+ .phead{margin:0 0 10px;padding:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:#8a8072;border-bottom:1px solid #2a2620}
+ .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
+ .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
+ .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
+ .t .nm:hover{color:var(--accent);text-decoration:underline}
+ button.danger{color:#8a8072} button.danger:hover{border-color:var(--danger);color:var(--danger)}
+ #autobtn.on{border-color:var(--accent);color:var(--accent)}
+ button.primary{background:var(--accent);border-color:var(--accent);color:#1a1815;font-weight:600}
+ button.primary:hover{filter:brightness(1.12);color:#1a1815}
+ .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
+ .shimmer{background:linear-gradient(90deg,#6b655c 0%,#a39a8c 20%,#f0ece4 50%,#a39a8c 80%,#6b655c 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
+ @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+ .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
+ .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+ #gol{display:inline-block;width:16px;height:16px;flex:none;border:1px solid #3a3a3a;border-radius:3px;background:#333;image-rendering:pixelated;opacity:.85}
+ #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
+ #working:empty{margin:0}
+ #working .glyph{display:inline-block;animation:spin 1.1s steps(8) infinite;margin-right:6px}
+ @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+ #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+ #log .l{padding:1px 0}
+ /* Long/multi-line assistant messages render inline as formatted markdown. */
+ #log .md{white-space:normal;margin:6px 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#ece6da}
+ #log .md>:first-child{margin-top:0} #log .md>:last-child{margin-bottom:0}
+ #log .md h1,#log .md h2,#log .md h3,#log .md h4{font-size:13px;font-weight:600;margin:8px 0 4px;color:#fff}
+ #log .md p,#log .md li{margin:3px 0} #log .md ul,#log .md ol{margin:3px 0;padding-left:18px}
+ #log .md code{background:#241f1a;padding:1px 4px;border-radius:3px;font-size:12px}
+ #log .md pre{background:#241f1a;padding:8px;border-radius:4px;overflow:auto;white-space:pre} #log .md pre code{background:none;padding:0}
+ #log .md a{color:var(--accent)} #log .md blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #3a342c;color:#a89e8e}
+ .la{color:#ece6da} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)}
+ #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
+ #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2620;
+  display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
+ body.drawer-open #backdrop{opacity:1;pointer-events:auto}
+ body.drawer-open #drawer{transform:translateX(0)}
+ #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#13110e}
+ #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#e3ddd1;border-radius:6px;padding:1px 9px;line-height:1.4}
+ #drawer .dclose:hover{border-color:var(--accent)}
+ #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
+</style>
+<header><canvas id=gol width=10 height=10></canvas><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span>
+ <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
+ <button class=primary onclick="channel()">+ channel</button></header>
+<main>
+ <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
+ <section><h2 class=phead>Output</h2><div id=working></div><pre id=log></pre></section>
+</main>
+<div id=backdrop onclick="closePlan()"></div>
+<div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
+<script src="/web/vendor/marked.min.js"></script>
+<script>
+const E=(s)=>document.getElementById(s)
+const esc=s=>(""+s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
+function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
+function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
+document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
+// Working indicator: server says executing/elapsed (polled in refresh); the
+// counter is driven client-side from a start time so it ticks every second
+// without hammering the server. work.start=null means no cycle in flight.
+let work={start:null,known:false}
+function drawWork(){const w=E("working");if(!w)return
+ if(work.start===null){w.innerHTML="";return}
+ const secs=work.known?Math.max(0,Math.floor((Date.now()-work.start)/1000)):null
+ w.innerHTML='<span class=glyph>✳</span><span class=shimmer>Working…'+(secs===null?"":" "+secs+"s")+'</span>'}
+async function pollStatus(){try{const s=await (await fetch("/api/status")).json()
+  if(!s.executing){work.start=null;work.known=false}
+  else{const base=Date.now()-(s.elapsed||0)*1000
+   // Re-sync start only on a new cycle or first sight, so the local counter
+   // stays smooth instead of jumping each poll.
+   if(work.start===null||Math.abs(base-work.start)>3000)work.start=base
+   work.known=s.elapsed!=null}}
+ catch(e){}
+ drawWork()}
+// Conway's Game of Life brand mark in the header. Toroidal so it never settles
+// into a static board; reseeds if it empties or stalls. Always visible as a
+// logo: it animates while a task is executing and freezes on its last frame
+// (golStop clears the interval but never hides the canvas) when idle.
+const GOL={cols:10,rows:10,timer:null,grid:null,prev:null,still:0}
+function golSeed(){const n=GOL.cols*GOL.rows,g=new Uint8Array(n)
+ // Real random initial conditions (~40% density) so every reseed is different —
+ // a genuine Conway run, not a fixed loop replaying the same board.
+ for(let i=0;i<n;i++)g[i]=Math.random()<.4?1:0
+ GOL.grid=g;GOL.prev=null;GOL.still=0}
+function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){let c=0
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue
+   const yy=(y+dy+rows)%rows,xx=(x+dx+cols)%cols;c+=grid[yy*cols+xx]}
+  const i=y*cols+x;nx[i]=grid[i]?(c==2||c==3?1:0):(c==3?1:0)}
+ // reseed if empty or unchanged (stable/oscillator-stuck) for a couple of steps
+ let alive=0,same=GOL.prev!=null;for(let i=0;i<n;i++){alive+=nx[i];if(GOL.prev&&nx[i]!=GOL.prev[i])same=false}
+ GOL.prev=grid;GOL.grid=nx
+ if(!alive){golSeed();return}
+ if(same){GOL.still++;if(GOL.still>1)golSeed()}else GOL.still=0}
+function golDraw(){const cv=E("gol");if(!cv)return;const ctx=cv.getContext("2d")
+ const {cols,rows,grid}=GOL;ctx.clearRect(0,0,cols,rows)
+ ctx.fillStyle="#bbbbbb"
+ for(let i=0;i<cols*rows;i++)if(grid[i])ctx.fillRect(i%cols,(i/cols)|0,1,1)}
+function golStart(){if(GOL.timer)return
+ if(!GOL.grid)golSeed()
+ golDraw();GOL.timer=setInterval(()=>{golStep();golDraw()},130)}
+// Freeze the mark on its current frame when idle — clears the interval but keeps
+// the canvas visible so it reads as a static logo (never hidden).
+function golStop(){if(GOL.timer){clearInterval(GOL.timer);GOL.timer=null}}
+async function act(verb,id,prompt){let text=""
+ if(prompt){text=window.prompt(prompt);if(text===null)return}
+ try{const r=await fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
+   body:JSON.stringify({verb,id,text})})
+  const d=await r.json()
+  if(!d.ok)alert("mux "+verb+" failed:\n"+(d.out||("HTTP "+r.status)))}
+ catch(e){alert("request failed: "+e)}
+ refresh()}
+function channel(){fetch("/api/channel",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})
+ .catch(e=>alert("channel failed: "+e))}
+// Open a Terminal continuing a stuck task's exact claude session (human-driven).
+function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})})
+ .then(r=>r.json()).then(d=>{if(!d.ok)alert("resume failed:\n"+(d.out||""))}).catch(e=>alert("resume failed: "+e))}
+// Open a Terminal running a FRESH claude seeded to complete a DRAFT task by hand
+// (human-driven). Runs outside the headless board — the task stays DRAFT.
+function direct(file){fetch("/api/direct",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({file})})
+ .then(r=>r.json()).then(d=>{if(!d.ok)alert("direct failed:\n"+(d.out||""))}).catch(e=>alert("direct failed: "+e))}
+// Auto mode (persisted server-side). When ON the toggle does the Release/Approve
+// gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
+let auto=false
+function drawAuto(){const b=E("autobtn");if(!b)return
+ b.textContent="Auto mode: "+(auto?"on":"off");b.classList.toggle("on",auto)}
+async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
+   headers:{"content-type":"application/json"},body:JSON.stringify({enabled:!auto})})
+  auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
+ drawAuto();refresh()}
+function buttons(t){const b=[],f=t.file
+ if(t.status=="DRAFT"&&!auto){b.push(`<button onclick="act('release','${f}')">Release</button>`)
+  // Drive a DRAFT by hand in a fresh claude session, without releasing it to
+  // the headless tick — the task stays DRAFT on the board.
+  b.push(`<button onclick="direct('${f}')">direct ⇥</button>`)}
+ if(t.status=="RUNNING"){
+  if(t.executing)return ""
+  if(!auto)b.push(`<button class=primary onclick="act('ok')">Approve</button>`)
+  b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
+ if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
+ // FAILED is terminal & already discarded — the only way forward is to clear it
+ // off the board. (If it kept a session, the resume button below also appears.)
+ if(t.status=="FAILED")b.push(`<button class=danger onclick="if(confirm('Delete this failed task?'))act('delete','${f}')">delete</button>`)
+ // Resume/direct the recorded session — but NEVER while a tick is live
+ // (t.executing): a second claude would collide with the headless tick.
+ // STUCK (BLOCKED, RUNNING killed mid-tick, or FAILED) → "resume ⇥" to
+ // re-open the chat and keep fixing it; a healthy RUNNING task awaiting
+ // approval → "direct ⇥" to steer it interactively.
+ // Pushed LAST so it renders after revert.
+ if(t.session&&!t.executing){
+  const stuck=t.awaiting_answer||t.interrupted||t.status=="FAILED"
+  const awaiting=t.status=="RUNNING"&&!stuck
+  if(stuck||awaiting)
+   b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}
+ return `<div class=acts>${b.join("")}</div>`}
+async function refresh(){
+ const ts=await (await fetch("/api/tasks")).json()
+ const rank=s=>s=="DONE"?1:0; ts.sort((a,b)=>rank(a.status)-rank(b.status))
+ E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
+  `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
+  `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
+  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\.task\.md$/,"")}</span></div>`+
+  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8072;font-size:12.5px'>No tasks</div>"
+ // Animate the logo only while a task is actively executing; otherwise freeze
+ // it on its last frame so it sits there as a static brand mark.
+ ts.some(t=>t.executing)?golStart():golStop()
+ const lg=await (await fetch("/api/log")).json()
+ E("log").innerHTML=lg.slice().reverse().map(l=>{
+  // Object entries are long/multi-line markdown messages: render them inline as
+  // formatted markdown (marked.js) instead of dumping raw ## / ** into the log.
+  if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
+  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8072;font-size:12.5px'>Idle — waiting for a READY task</div>")
+ pollStatus()}
+golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
+fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
+fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
+refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
+</script>
