@@ -76,7 +76,17 @@
   display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
  body.drawer-open #backdrop{opacity:1;pointer-events:auto}
  body.drawer-open #drawer{transform:translateX(0)}
- #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid var(--mux-border);background:var(--mux-panel)}
+ #drawer .dhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border-bottom:1px solid var(--mux-border);background:var(--mux-panel)}
+ /* Segmented control: a single inset pill holding the three view tabs; the
+    active tab fills/brightens, inactive ones stay muted. */
+ #drawer .dtabs{display:inline-flex;gap:2px;background:var(--mux-bg);border:1px solid var(--mux-border-strong);border-radius:7px;padding:2px}
+ #drawer .dtab{font-family:var(--mux-sans);font-size:12px;line-height:1.4;cursor:pointer;border:0;background:transparent;color:var(--mux-text-muted);border-radius:5px;padding:2px 12px}
+ #drawer .dtab:hover{color:var(--mux-text)}
+ #drawer .dtab.active{background:var(--mux-chip);color:var(--mux-text-strong);box-shadow:inset 0 0 0 1px var(--accent)}
  #drawer .dclose{font-family:var(--mux-sans);font-size:12px;cursor:pointer;border:1px solid var(--mux-border-strong);background:var(--mux-chip);color:var(--mux-text);border-radius:6px;padding:2px 8px;line-height:1.4}
  #drawer .dclose:hover{border-color:var(--accent)}
- #drawer iframe{flex:1;width:100%;border:0;background:var(--mux-bg)}
+ /* The three views stack in the same box; only .active is shown, so flipping
+    tabs is a visibility toggle (each iframe stays mounted, scroll preserved). */
+ #drawer .dbody{flex:1;position:relative}
+ #drawer .dframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--mux-bg);display:none}
+ #drawer .dframe.active{display:block}

@@ -13,6 +13,15 @@
  <section><h2 class=phead>Output</h2><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>
-<div id=drawer><div class=dhead><button class=dclose onclick="closePlan()" title="close">×</button></div><iframe id=planframe></iframe></div>
+<div id=drawer><div class=dhead><div class=dtabs role=tablist>
+  <button class=dtab data-view=task onclick="showView('task')">Task</button>
+  <button class=dtab data-view=output onclick="showView('output')">Output</button>
+  <button class=dtab data-view=diff onclick="showView('diff')">Diff</button>
+ </div><button class=dclose onclick="closePlan()" title="close">×</button></div>
+ <div class=dbody>
+  <iframe class=dframe data-view=task></iframe>
+  <iframe class=dframe data-view=output></iframe>
+  <iframe class=dframe data-view=diff></iframe>
+ </div></div>
 <script src="/web/vendor/marked.min.js"></script>
 <script src="/web/app.js"></script>

@@ -1,11 +1,41 @@
 const E=(s)=>document.getElementById(s)
 const esc=s=>(""+s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
-function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
-// Open the code diff for a task in the same drawer iframe: the pending working-tree
-// change for a RUNNING task (review-before-approve), or the landed commit for a COMMITTED one.
-function openDiff(file){E("planframe").src='/diff?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
-function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
-document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
+// The drawer is one tabbed surface over THREE views of a single task: Task
+// (/plan), Output (/output), Diff (/diff). Each lives in its own iframe that's
+// loaded lazily on first activation and then kept mounted, so flipping tabs is
+// instant (no reload flash, scroll preserved) — switching just shows/hides.
+const VIEWS=["task","output","diff"]
+const VIEW_SRC={task:f=>'/plan?file='+encodeURIComponent(f),
+ output:f=>'/output?file='+encodeURIComponent(f),
+ diff:f=>'/diff?file='+encodeURIComponent(f)}
+let drawerFile=null
+function frameFor(v){return document.querySelector('.dframe[data-view="'+v+'"]')}
+function tabFor(v){return document.querySelector('.dtab[data-view="'+v+'"]')}
+// Activate a view: lazy-load its iframe for the current task on first sight, then
+// toggle the .active class on frames + tabs. No src rewrite once loaded.
+function showView(v){if(!drawerFile)return
+ const fr=frameFor(v)
+ if(fr&&!fr.dataset.loaded){fr.src=VIEW_SRC[v](drawerFile);fr.dataset.loaded="1"}
+ VIEWS.forEach(x=>{const f=frameFor(x),t=tabFor(x),on=x===v
+  if(f)f.classList.toggle("active",on);if(t)t.classList.toggle("active",on)})}
+// One opener for all three buttons/affordances: records the task, blanks any
+// views left from a prior task, lazy-loads the requested view, opens the drawer.
+function openTask(file,view){
+ if(file!==drawerFile){VIEWS.forEach(x=>{const f=frameFor(x);if(f){f.src="about:blank";delete f.dataset.loaded}})}
+ drawerFile=file;document.body.classList.add("drawer-open");showView(view||"task")}
+function openPlan(file){openTask(file,"task")}
+// Open the code diff for a task: the pending working-tree change for a RUNNING
+// task (review-before-approve), or the landed commit for a COMMITTED one.
+function openDiff(file){openTask(file,"diff")}
+function closePlan(){document.body.classList.remove("drawer-open")
+ VIEWS.forEach(x=>{const f=frameFor(x);if(f){f.src="about:blank";delete f.dataset.loaded}})
+ drawerFile=null}
+document.addEventListener("keydown",e=>{if(!document.body.classList.contains("drawer-open"))return
+ if(e.key=="Escape")return closePlan()
+ const cur=VIEWS.findIndex(v=>frameFor(v)&&frameFor(v).classList.contains("active"))
+ if(e.key=="ArrowRight"||e.key=="ArrowLeft"){if(cur<0)return
+  const n=(cur+(e.key=="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;showView(VIEWS[n])}
+ else if(e.key=="1"||e.key=="2"||e.key=="3")showView(VIEWS[+e.key-1])})
 // Working indicator: server says executing/elapsed (polled in refresh); the
 // counter is driven client-side from a start time so it ticks every second
 // without hammering the server. work.start=null means no cycle in flight.

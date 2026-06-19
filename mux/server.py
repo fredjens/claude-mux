@@ -570,6 +570,71 @@ def diff_page(name):
     return _diff_page(title, chips, "\n".join(blocks), "(no changes)")
 
 
+def _output_session():
+    """The claude session id the live tick log (output.jsonl) belongs to — the
+    last `init` event's session_id. "" if absent/unreadable. Used to decide whether
+    a requested task's transcript is the one currently on disk."""
+    path = os.path.join(REPO, ".mux", "log", "output.jsonl")
+    sid = ""
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "system" and ev.get("subtype") == "init":
+                    sid = ev.get("session_id") or sid
+    except OSError:
+        return ""
+    return sid
+
+
+def _output_md(lines):
+    """Turn log_lines() output into a markdown transcript body: assistant markdown
+    messages (dicts) become prose blocks; runs of plain event lines (tool calls,
+    results, dividers) become monospace code fences. Reuses log_lines verbatim —
+    this only re-lays-it-out for the static page, it does not re-parse the log."""
+    blocks, buf = [], []
+    def flush():
+        if buf:
+            blocks.append("```\n" + "\n".join(buf) + "\n```")
+            buf.clear()
+    for l in lines:
+        if isinstance(l, dict):
+            flush()
+            blocks.append(l.get("md", ""))
+        else:
+            # Strip the U+001F cycle-divider sentinel so it never shows as a glyph.
+            buf.append(l[1:] if (l and l[0] == "\x1f") else l)
+    flush()
+    return "\n\n".join(blocks)
+
+
+def output_page(name):
+    """Render the executor's turn transcript for a task, reusing _md_page's dark
+    theme (same look as /plan). The live log (output.jsonl) is the most-recent tick
+    only, so it's shown ONLY when it belongs to the requested task (its recorded
+    `# Session:` matches the log's session id); otherwise a graceful "not retained"
+    empty state — never a stale or mismatched transcript. Read-only."""
+    text = read_task(name)
+    if text in ("(invalid task)", "(task not found)"):
+        return _md_page("output", "", text)
+    slug = os.path.basename(name).replace(".task.md", "")
+    status = _task_field(text, "STATUS") or "?"
+    title = _task_field(text, "Task") or slug
+    task_sid = _task_field(text, "Session")
+    log_sid = _output_session()
+    chips = f"<b>status</b> {escape(status)}  ·  <b>turn transcript</b>"
+    if task_sid and log_sid and task_sid == log_sid:
+        body = _output_md(log_lines()) or "_(no output yet)_"
+    else:
+        body = ("_Turn output isn't retained for past tasks._\n\n"
+                "The live transcript only covers the most recent tick. Re-run or "
+                "resume the task to see its turn output here.")
+    return _md_page(title, chips, body)
+
+
 def spawn_channel(name=None):
     """Open a real Terminal.app window running a channel in this repo, focused."""
     name = re.sub(r"[^A-Za-z0-9_-]", "", name or "") or ("p" + time.strftime("%H%M%S"))
@@ -744,6 +809,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/diff?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, diff_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
+        elif self.path.startswith("/output?"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, output_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
             # against WEB and confined to it — normpath collapses any ../ so a
