@@ -895,15 +895,17 @@ start_tui() {
     [ "$hi" -ge $((off+rows_avail)) ] && off=$((hi-rows_avail+1))
 
     # --- render ----------------------------------------------------------
+    # Big bold block-letter banner (pure █ blocks — no backslashes to escape).
     tput clear 2>/dev/null || true
-    printf '%s%s   _ __ ___  _   ___  __%s\n'   "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  | '"'"'_ \` _ \\| | | \\ \\/ /%s\n' "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  | | | | | | |_| |>  < %s\n'   "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  |_| |_| |_|\\__,_/_/\\_\\%s\n'  "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s   M U L T I P L E X E R%s\n'      "$C_DIM" "$C_RST"
     printf '\n'
-    printf '%s  branch %s%s%s   ·   %s   tree%s\n' "$C_DIM" "$C_RST$C_BOLD" "$current" "$C_RST$C_DIM" "$dirty$ahead" "$C_RST"
-    printf '%s  pick the branch for THIS session — everything you commit lands there%s\n' "$C_DIM" "$C_RST"
+    printf '%s%s  ██   ██  ██   ██  ██   ██%s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  ███ ███  ██   ██   ██ ██ %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  ██ █ ██  ██   ██    ███  %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  ██   ██  ██   ██   ██ ██ %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  ██   ██   █████   ██   ██%s   %sMULTIPLEXER%s\n' "$C_ACC" "$C_BOLD" "$C_RST" "$C_DIM" "$C_RST"
+    printf '%s  ───────────────────────────────────────%s\n'     "$C_DIM" "$C_RST"
+    printf '%s  on %s%s%s · %s · choose this session'"'"'s branch%s\n' \
+      "$C_DIM" "$C_RST$C_BOLD" "$current" "$C_RST$C_DIM" "$dirty$ahead" "$C_RST"
     printf '\n'
 
     local i label
@@ -913,13 +915,13 @@ start_tui() {
         create)   label="✚ Create a new branch…" ;;
         branch)   label="⌖ ${rval[i]}"; [ "${rval[i]}" = "$current" ] && label="$label  (current)" ;;
       esac
-      if [ "$i" -eq "$hi" ]; then printf '  %s %-56s%s\n' "$C_SEL" "$label" "$C_RST"
-      else                        printf '    %s\n' "$label"; fi
+      if [ "$i" -eq "$hi" ]; then printf '   %s%s%-44s ◀%s\n' "$C_ACC" "$C_BOLD" "$label" "$C_RST"
+      else                        printf '   %s%s%s\n' "$C_DIM" "$label" "$C_RST"; fi
     done
 
     printf '\n'
     if [ -n "$filter" ]; then printf '  %sfilter:%s %s_\n' "$C_DIM" "$C_RST" "$filter"
-    else printf '  %s↑/↓ move · type to filter · Enter select · Esc/q cancel%s\n' "$C_DIM" "$C_RST"; fi
+    else printf '  %s↑/↓ move · type to filter · ⏎ select · esc cancel%s\n' "$C_DIM" "$C_RST"; fi
 
     # --- read one key ----------------------------------------------------
     local k; IFS= read -rsn1 k || k=""
