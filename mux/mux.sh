@@ -22,8 +22,9 @@
 #   mux next                    the one task the output should run now
 #   mux show     <id>           print a task file
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
-#   mux release-all             every DRAFT -> READY (auto mode; no-op if none)
 #   mux claim    <id>           READY  -> RUNNING (output claims it; not for you)
+#                               (in auto mode the executor also claims DRAFTs in
+#                               place — no DRAFT->READY rewrite)
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
 #   mux ok       [note...]      approve RUNNING: commit the changes -> DONE
@@ -70,8 +71,17 @@ TASKS=.mux/tasks
 # `# Depends-on:` pointing at a deleted task still resolves. Lives under .mux,
 # so it's never committed (cmd_ok does `git reset -q -- .mux`).
 DONE_LOG=.mux/done.log
+# Auto mode flag — the dashboard's "Auto mode" toggle persists as the EXISTENCE
+# of this file (mirrors server.py's auto_enabled). When ON the executor runs
+# DRAFT tasks IN PLACE (no DRAFT→READY rewrite) and the dashboard auto-approves
+# each finish, so the queue flows hands-off. Because nothing on disk is mutated,
+# toggling OFF leaves every task's status exactly as it was — the Release/Approve
+# buttons simply reappear.
+AUTO_FLAG=.mux/auto
 
 # --- helpers ---------------------------------------------------------------
+
+auto_on() { [ -f "$AUTO_FLAG" ]; }
 
 die() { echo "✗ $*" >&2; exit 1; }
 
@@ -239,16 +249,15 @@ cmd_release() {
   echo "→ ${f##*/}  DRAFT → READY"
 }
 
-# Release EVERY DRAFT task to READY in one shot — what auto mode calls on a timer.
-# Leaves all other statuses untouched, and is a clean no-op (exit 0) when there
-# are no DRAFTs, so a UI calling it on a poll never sees a spurious error.
-cmd_release_all() {
-  local f
-  for f in "$TASKS"/*.task.md; do
-    [ "$(task_status "$f")" = DRAFT ] || continue
-    set_status "$f" READY
-    echo "→ ${f##*/}  DRAFT → READY"
-  done
+# Regret a release before the output claims it: READY -> DRAFT. The inverse of
+# cmd_release, so a task can be pulled back off the queue and edited. Guarded to
+# READY only — you can't unrelease something already RUNNING/DONE/etc.
+cmd_unrelease() {
+  [ $# -ge 1 ] || die "usage: mux unrelease <id>"
+  local f; f="$(resolve_id "$1")"
+  require_status "$f" READY
+  set_status "$f" DRAFT
+  echo "← ${f##*/}  READY → DRAFT"
 }
 
 cmd_block() {
@@ -273,11 +282,15 @@ $*"
 
 cmd_claim() {
   [ $# -ge 1 ] || die "usage: mux claim <id>"
-  local f; f="$(resolve_id "$1")"
-  require_status "$f" READY
+  local f st; f="$(resolve_id "$1")"; st="$(task_status "$f")"
+  # The output claims a READY task → RUNNING. In auto mode it also claims DRAFTs
+  # in place (no DRAFT→READY rewrite first), so toggling auto off leaves un-run
+  # tasks DRAFT with their Release button intact.
+  [ "$st" = READY ] || { auto_on && [ "$st" = DRAFT ]; } \
+    || die "${f##*/} is $st — claim expects READY (DRAFT too, in auto mode) — refused"
   git_clean || die "working tree not clean — commit or stash your own changes first"
   set_status "$f" RUNNING
-  echo "▶ ${f##*/}  READY → RUNNING   (on $(git branch --show-current 2>/dev/null || echo '?'))"
+  echo "▶ ${f##*/}  $st → RUNNING   (on $(git branch --show-current 2>/dev/null || echo '?'))"
 }
 
 # Throw away all uncommitted work EXCEPT the .mux queue. Safe because the
@@ -438,8 +451,11 @@ cmd_next() {
   for f in "$TASKS"/*.task.md; do
     [ "$(task_status "$f")" = RUNNING ] && { printf '%s\n' "${f##*/}"; return 0; }
   done
+  local st
   for f in "$TASKS"/*.task.md; do          # FIFO by filename
-    [ "$(task_status "$f")" = READY ] || continue
+    st="$(task_status "$f")"
+    # READY is always runnable; in auto mode a DRAFT is too (run in place).
+    [ "$st" = READY ] || { auto_on && [ "$st" = DRAFT ]; } || continue
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
       dep_is_done "$dep" || continue
@@ -615,7 +631,6 @@ cmd="${1:-status}"; shift || true
 case "$cmd" in
   add)            cmd_add "$@" ;;
   release)        cmd_release "$@" ;;
-  release-all)    cmd_release_all "$@" ;;
   claim)          cmd_claim "$@" ;;
   start|web)      cmd_web "$@" ;;
   block)          cmd_block "$@" ;;

@@ -76,14 +76,18 @@ def auto_enabled():
 
 def autopilot():
     """One hands-off cycle, piggy-backed on the /api/tasks poll when auto is ON.
-    Flips ONLY the two human gates — release (in bulk) then approve — never
-    auto-claims, reverts, fails, or resolves. Order matters: release first.
+    Flips ONLY the approve gate — auto-commits a finished RUNNING task so the
+    queue keeps flowing — and never auto-claims, reverts, fails, or resolves.
+
+    It does NOT release drafts: auto mode is a transient executor behavior, not a
+    status rewrite. The executor runs DRAFTs in place while auto is on (mux.sh
+    auto_on), so toggling auto off mutates nothing on disk — every task keeps its
+    status and its Release/Approve button simply reappears.
 
     Auto-approve fires only when a finished RUNNING task is genuinely waiting:
     it exists, its tick is NOT in flight, it is not flagged interrupted, and the
     tree is dirty outside .mux/ (real work to commit). Any miss → do nothing
     this cycle (never `mux ok` a clean tree — it would die — or a live tick)."""
-    mux("release-all")
     if status()["executing"]:
         return
     ts = tasks()
@@ -480,7 +484,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, page, "text/html; charset=utf-8")
         elif self.path == "/api/tasks":
             if auto_enabled():
-                autopilot()          # release-all then (if safe) ok, BEFORE the board
+                autopilot()          # auto-approve a finished task, BEFORE the board
             self._send(200, json.dumps(tasks()))
         elif self.path == "/api/auto":
             self._send(200, json.dumps({"enabled": auto_enabled()}))

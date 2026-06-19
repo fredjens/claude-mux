@@ -299,9 +299,11 @@ class HttpRoutingTest(unittest.TestCase):
         self.assertEqual(post(False), {"enabled": False})
         self.assertFalse(os.path.exists(marker))
 
-    def test_api_tasks_autopilot_releases_then_approves(self):
+    def test_api_tasks_autopilot_approves_finished_task(self):
         # With .mux/auto present and a finished (dirty-tree, non-interrupted,
-        # not-executing) RUNNING task, /api/tasks must call release-all then ok.
+        # not-executing) RUNNING task, /api/tasks auto-approves it (mux ok).
+        # Auto mode never releases drafts — the executor runs them in place — so
+        # release-all must NEVER be called.
         os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
         open(os.path.join(self.tmp, ".mux", "auto"), "w").close()
         server.tasks = lambda: [{"file": "r.task.md", "status": "RUNNING",
@@ -313,14 +315,12 @@ class HttpRoutingTest(unittest.TestCase):
         server.git_dirty_nonmux = lambda: True
 
         self._get("/api/tasks")
-        verbs = [c[0] for c in self.calls]
-        self.assertIn(("release-all",), self.calls)
         self.assertIn(("ok",), self.calls)
-        # release before approve
-        self.assertLess(verbs.index("release-all"), verbs.index("ok"))
+        self.assertNotIn(("release-all",), self.calls)
 
     def test_api_tasks_autopilot_skips_ok_on_clean_tree(self):
-        # Auto on, but the tree is clean: release-all still runs, ok must NOT.
+        # Auto on, but the tree is clean: nothing to commit, so ok must NOT run
+        # (and release-all is gone entirely).
         os.makedirs(os.path.join(self.tmp, ".mux"), exist_ok=True)
         open(os.path.join(self.tmp, ".mux", "auto"), "w").close()
         server.tasks = lambda: [{"file": "r.task.md", "status": "RUNNING",
@@ -332,8 +332,8 @@ class HttpRoutingTest(unittest.TestCase):
         server.git_dirty_nonmux = lambda: False
 
         self._get("/api/tasks")
-        self.assertIn(("release-all",), self.calls)
         self.assertNotIn(("ok",), self.calls)
+        self.assertNotIn(("release-all",), self.calls)
 
     def test_post_verb_forwards_argv_in_order(self):
         payload = json.dumps({"verb": "resolve", "id": "t1", "text": "my answer"}).encode()

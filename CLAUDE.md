@@ -15,7 +15,7 @@ Task files are the single source of truth. Every state change goes through the
 
 - `mux/mux.sh` — the CLI ("verb layer"): the only sanctioned way to change a
   task's state. Verbs dispatch to `cmd_*` functions (see the `case` at the
-  bottom): `add`, `release`/`release-all`, `claim`, `block`, `resolve`, `ok`,
+  bottom): `add`, `release`, `claim`, `block`, `resolve`, `ok`,
   `changes`, `revert`, `fail`, `show`, `status`/`ls`, `board`, `next`,
   `channel`, `web`/`start`, `output`, `tick`, `stop`, `help`. The top-of-file
   comment block is the canonical usage reference.
@@ -42,6 +42,14 @@ States (see `task_status` / `set_status` in `mux.sh`):
 RUNNING; `ok` commits the working tree and marks it DONE; `revert`/`fail` discard
 to FAILED; `block` parks it with a question (BLOCKED) until `resolve` re-queues
 it.
+
+**Auto mode** (the dashboard toggle, persisted as the `.mux/auto` flag) is a
+transient executor behavior, not a status rewrite. While it's on, `next`/`claim`
+treat a DRAFT as runnable and the executor runs it in place (DRAFT → RUNNING,
+skipping READY), and the dashboard auto-approves each finished task so the queue
+flows hands-off. Nothing on disk is mutated by the toggle, so flipping auto off
+leaves every task's status exactly as it was (see `auto_on` in `mux.sh`,
+`autopilot` in `server.py`).
 
 ## Task-file format
 

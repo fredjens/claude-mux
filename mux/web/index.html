@@ -2,10 +2,10 @@
 <style>
  :root{--accent:__ACCENT__;--ok:__OK__;--sub:__SUB__;--danger:__DANGER__}
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
- header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
- header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #2a2620;
-  background:transparent;color:#a89e8e;border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:#e3ddd1}
- #provider{color:#8a8072;white-space:nowrap}
+ header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2827;display:flex;gap:12px;align-items:center}
+ header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #2a2827;
+  background:transparent;color:#a8a29e;border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:#e3ddd1}
+ #provider{color:#8a8480;white-space:nowrap}
  main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
  /* Narrow viewport: stack Queue above Output and let the page scroll
     instead of squeezing two columns. Drop the fixed viewport height so the
@@ -14,22 +14,22 @@
   main{grid-template-columns:1fr;height:auto}
   section{min-height:50vh}
  }
- section{background:#1a1815;overflow:auto;padding:12px 16px} section+section{border-left:1px solid #2a2620} .t{padding:7px 0;border-bottom:1px solid #221f1a}
- .phead{margin:0 0 10px;padding:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:#8a8072;border-bottom:1px solid #2a2620}
- .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8072}
+ section{background:#1a1815;overflow:auto;padding:12px 16px} section+section{border-left:1px solid #2a2827} .t{padding:7px 0;border-bottom:1px solid #232120}
+ .phead{margin:0 0 10px;padding:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:#8a8480;border-bottom:1px solid #2a2827}
+ .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:#8a8480}
  .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
- .READY,.DONE,.DRAFT{color:#8a8072} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
+ .READY,.DONE,.DRAFT{color:#8a8480} .t .nm{color:#d8d2c6;margin:2px 0;cursor:pointer}
  .t .nm:hover{color:var(--accent);text-decoration:underline}
- button.danger{color:#8a8072} button.danger:hover{border-color:var(--danger);color:var(--danger)}
+ button.danger{color:#8a8480} button.danger:hover{border-color:var(--danger);color:var(--danger)}
  #autobtn.on{border-color:var(--accent);color:var(--accent)}
  button.primary{background:var(--accent);border-color:var(--accent);color:#1a1815;font-weight:600}
  button.primary:hover{filter:brightness(1.12);color:#1a1815}
  button.ok{background:var(--ok);border-color:var(--ok);color:#1a1815;font-weight:600}
  button.ok:hover{filter:brightness(1.12);color:#1a1815}
  .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
- .shimmer{background:linear-gradient(90deg,#6b655c 0%,#a39a8c 20%,#f0ece4 50%,#a39a8c 80%,#6b655c 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
+ .shimmer{background:linear-gradient(90deg,#6b6764 0%,#a39e9a 20%,#f0ece4 50%,#a39e9a 80%,#6b6764 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
- .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
+ .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a8a29e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
  .acts button{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px 4px}
  header button{padding:3px 8px 4px}
@@ -47,20 +47,20 @@
  #log .md p,#log .md li{margin:3px 0} #log .md ul,#log .md ol{margin:3px 0;padding-left:18px}
  #log .md code{background:#241f1a;padding:1px 4px;border-radius:3px;font-size:12px}
  #log .md pre{background:#241f1a;padding:8px;border-radius:4px;overflow:auto;white-space:pre} #log .md pre code{background:none;padding:0}
- #log .md a{color:var(--accent)} #log .md blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #3a342c;color:#a89e8e}
- .la{color:#ece6da} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:#3a342c;margin:8px 0} .lx{color:#a89e8e} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)}
+ #log .md a{color:var(--accent)} #log .md blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #393736;color:#a8a29e}
+ .la{color:#ece6da} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:#393736;margin:8px 0} .lx{color:#a8a29e} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)}
  #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
- #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2620;
+ #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2827;
   display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
  body.drawer-open #backdrop{opacity:1;pointer-events:auto}
  body.drawer-open #drawer{transform:translateX(0)}
- #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#13110e}
- #drawer .dclose{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#e3ddd1;border-radius:6px;padding:2px 8px;line-height:1.4}
+ #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2827;background:#13110e}
+ #drawer .dclose{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #393736;background:#241f1a;color:#e3ddd1;border-radius:6px;padding:2px 8px;line-height:1.4}
  #drawer .dclose:hover{border-color:var(--accent)}
  #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
 </style>
 <header><canvas id=gol width=10 height=10></canvas><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span>
- <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
+ <button id=autobtn onclick="toggleAuto()" title="Auto mode: the executor runs DRAFT tasks in place and finished tasks are auto-approved — no status is rewritten, so toggling off restores every button">Auto mode: …</button>
  <button class=primary onclick="channel()">channel +</button></header>
 <main>
  <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
@@ -180,7 +180,7 @@ async function refresh(){
   `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\.task\.md$/,"")}</span></div>`+
-  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8072;font-size:12.5px'>No tasks</div>"
+  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8480;font-size:12.5px'>No tasks</div>"
  // Animate the logo only while a task is actively executing; otherwise freeze
  // it on its last frame so it sits there as a static brand mark.
  ts.some(t=>t.executing)?golStart():golStop()
@@ -189,7 +189,7 @@ async function refresh(){
   // Object entries are long/multi-line markdown messages: render them inline as
   // formatted markdown (marked.js) instead of dumping raw ## / ** into the log.
   if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
-  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8072;font-size:12.5px'>Idle — waiting for a READY task</div>")
+  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8480;font-size:12.5px'>Idle — waiting for a READY task</div>")
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
