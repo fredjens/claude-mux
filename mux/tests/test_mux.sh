@@ -586,18 +586,19 @@ STUB
 }
 
 # ==========================================================================
-header "mux start — branch selection (the session front door)"
+header "mux web / bare mux — branch selection (the session front door)"
 # ==========================================================================
 # MUX_START_DRYRUN=1 makes cmd_web do ONLY branch selection then return, so we
 # can assert the create-or-checkout effects without launching the loop/server.
-# Stdin is not a tty under the test harness, so the fresh-start prompt is auto-
+# Stdin is not a tty under the test harness, so the fresh-start picker is auto-
 # skipped (continues silently) — these tests cover the non-interactive paths.
+# `mux web` is the explicit form; bare `mux` is the same command (default verb).
 test_start_branch() {
   local d; d="$(setup_repo)"
   local base; base="$( cd "$d" && git branch --show-current )"
 
-  # mux start <newbranch> → creates it, switches, records the base.
-  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start newfeat 2>&1 )"; RC=$?
+  # mux web <newbranch> → creates it, switches, records the base.
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" web newfeat 2>&1 )"; RC=$?
   assert_zero "start <newbranch> exits 0"
   assert_contains "start <newbranch> reports creation" "$OUT" "created branch newfeat"
   assert_eq "switched to the new branch" "$( cd "$d" && git branch --show-current )" "newfeat"
@@ -605,23 +606,35 @@ test_start_branch() {
 
   # On the feature branch with an unpushed commit, a no-arg start CONTINUES.
   ( cd "$d" && echo x > f.txt && git add f.txt && git commit -qm work )
-  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 2>&1 )"; RC=$?
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" web 2>&1 )"; RC=$?
   assert_contains "in-flight (unpushed) start continues silently" "$OUT" "continuing on newfeat"
   assert_eq "stayed on the feature branch" "$( cd "$d" && git branch --show-current )" "newfeat"
 
   # A numeric first arg is still the PORT, never a branch name.
-  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 9999 2>&1 )"; RC=$?
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" web 9999 2>&1 )"; RC=$?
   assert_zero "start <port> (numeric) exits 0"
   assert_eq "numeric arg did not create a branch" "$( cd "$d" && git branch --show-current )" "newfeat"
 
   # mux start <existing> checks it out (back to base).
-  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start "$base" 2>&1 )"; RC=$?
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" web "$base" 2>&1 )"; RC=$?
   assert_zero "start <existing> exits 0"
   assert_eq "checked out the existing branch" "$( cd "$d" && git branch --show-current )" "$base"
 
   # An invalid branch name is rejected.
-  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 'bad..name' 2>&1 )"; RC=$?
-  assert_nonzero "start rejects an invalid branch name"
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" web 'bad..name' 2>&1 )"; RC=$?
+  assert_nonzero "web rejects an invalid branch name"
+
+  # Bare `mux` (NO args) is the SAME command as `mux web` — the default verb.
+  # (A branch is given via `mux web <branch>`; bare `mux` just resumes/continues.)
+  ( cd "$d" && git checkout -q "$base" )
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" 2>&1 )"; RC=$?
+  assert_zero "bare mux (no args) exits 0 (default verb = web)"
+  assert_contains "bare mux runs the session front door" "$OUT" "continuing on $base"
+
+  # The old `start` verb is gone — it must error, not silently launch anything.
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 2>&1 )"; RC=$?
+  assert_nonzero "removed 'start' verb is rejected"
+  assert_contains "start reports unknown verb" "$OUT" "unknown verb"
 }
 
 # ==========================================================================

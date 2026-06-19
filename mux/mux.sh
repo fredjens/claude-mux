@@ -10,14 +10,15 @@
 # validated edits to those files; git (committing on `ok`) is the output's job.
 #
 #   mux channel  [name]         open a channel (reads repo, writes only .mux/)
-#   mux start    [branch] [port]  open a session: pick/create the branch, then
-#                               the web view + output loop (default :8770). With
-#                               no args on a fresh start (clean tree, all pushed,
-#                               nothing RUNNING) it PROMPTS for the branch; with
-#                               in-flight work it silently continues. `mux start
+#   mux         [branch] [port]  THE default: open a session — pick/create the
+#                               branch, then the web view + output loop (:8770).
+#                               On a fresh start (clean tree, all pushed, nothing
+#                               RUNNING) it opens the interactive branch PICKER;
+#                               with in-flight work it silently continues. `mux
+#                               web` is the same command spelled out. `mux
 #                               <branch>` is non-interactive; `--new` forces the
-#                               prompt; a numeric first arg is still the port.
-#   mux web      [branch] [port]  alias of `mux start`
+#                               picker; a numeric first arg is still the port.
+#   mux web      [branch] [port]  explicit form of the bare `mux` command above
 #   mux stop                    stop this repo's web UI + output loop
 #   mux output [interval]     headless output loop on its own (web starts this for you)
 #   mux tick                    run ONE headless cycle (for launchd/cron)
@@ -817,6 +818,82 @@ start_new_branch() {
   fi
 }
 
+# Mid gray for the wordmark (bright-black / 256-colour 245), dim fallback.
+# Monochrome by design — no accent hue, to match the app's minimal chrome.
+_banner_gray() {
+  local g; g="$(tput setaf 240 2>/dev/null || true)"
+  [ -z "$g" ] && g="$(tput setaf 8 2>/dev/null || true)"
+  [ -z "$g" ] && g="$(tput dim 2>/dev/null || true)"
+  printf '%s' "$g"
+}
+
+# The rule + "on <branch> · clean/dirty [· N ahead]" line under the wordmark.
+# Shared by the static banner and the animated splash so they end identically.
+_banner_footer() {
+  local C_RST C_DIM cur dirty ahead=""
+  C_RST="$(tput sgr0 2>/dev/null || true)"; C_DIM="$(tput dim 2>/dev/null || true)"
+  cur="$(git branch --show-current 2>/dev/null || echo '?')"
+  if git_clean; then dirty="clean"; else dirty="dirty"; fi
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local n; n="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    [ "${n:-0}" -gt 0 ] && ahead=" · ${n} ahead"
+  fi
+  printf '\n%s  on %s · %s%s%s\n' "$C_DIM" "$cur" "$dirty" "$ahead" "$C_RST"
+}
+
+# The MULTIPLEXER wordmark, colored with a left→right rainbow (256-colour) via
+# python3 — which `mux web` already requires anyway. Falls back to solid gray
+# when python3 is missing, the terminal lacks 256 colours, or NO_COLOR is set.
+_banner_wordmark() {
+  local C_RST C_GRAY; C_RST="$(tput sgr0 2>/dev/null || true)"; C_GRAY="$(_banner_gray)"
+  local -a art=(
+"▗▖  ▗▖▗▖ ▗▖▗▖ ▗▄▄▄▖▗▄▄▄▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▖"
+"▐▛▚▞▜▌▐▌ ▐▌▐▌   █    █  ▐▌ ▐▌▐▌   ▐▌    ▝▚▞▘ ▐▌   ▐▌ ▐▌"
+"▐▌  ▐▌▐▌ ▐▌▐▌   █    █  ▐▛▀▘ ▐▌   ▐▛▀▀▘  ▐▌  ▐▛▀▀▘▐▛▀▚▖"
+"▐▌  ▐▌▝▚▄▞▘▐▙▄▄▖█  ▗▄█▄▖▐▌   ▐▙▄▄▖▐▙▄▄▖▗▞▘▝▚▖▐▙▄▄▖▐▌ ▐▌"
+  )
+  local ncolors; ncolors="$(tput colors 2>/dev/null || echo 0)"
+  if [ -z "${NO_COLOR:-}" ] && [ "${ncolors:-0}" -ge 256 ] && command -v python3 >/dev/null 2>&1; then
+    PYTHONUTF8=1 python3 -c '
+import sys, colorsys
+lines = sys.argv[1:]
+maxw = max((len(l) for l in lines), default=1)
+def x256(r, g, b):
+    def c(v): return 0 if v < 48 else (5 if v > 238 else round((v - 35) / 40.0))
+    return 16 + 36 * c(r) + 6 * c(g) + c(b)
+for l in lines:
+    out = "  "
+    for i, ch in enumerate(l):
+        if ch == " ":
+            out += " "
+            continue
+        r, g, b = colorsys.hsv_to_rgb(i / max(maxw - 1, 1) * 0.83, 0.92, 1.0)
+        out += "\033[38;5;%dm%s" % (x256(int(r*255), int(g*255), int(b*255)), ch)
+    sys.stdout.write(out + "\033[0m\n")
+' "${art[@]}"
+  else
+    local a; for a in "${art[@]}"; do printf '%s  %s%s\n' "$C_GRAY" "$a" "$C_RST"; done
+  fi
+}
+
+# The MULTIPLEXER splash banner — a big gray block-letter wordmark + footer.
+# Used for the picker's redraw loop and as the no-animation fallback. TTY-only
+# (the caller gates on `[ -t 1 ]`) so logs/CI/tests never see escapes. Falls
+# back to a one-line wordmark on narrow terminals (< 72 cols).
+start_banner() {
+  local C_RST C_GRAY cols
+  C_RST="$(tput sgr0 2>/dev/null || true)"; C_GRAY="$(_banner_gray)"
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  printf '\n'
+  if [ "${cols:-80}" -ge 59 ]; then
+    _banner_wordmark
+  else
+    printf '%s  M U L T I P L E X E R%s
+' "$C_GRAY" "$C_RST"
+  fi
+  _banner_footer
+}
+
 # Restore the terminal after the TUI: cursor back, main screen, echo on. Reads
 # the saved stty from the $_MUX_STTY global (set by start_tui) so it works as a
 # trap handler even when fired mid-pick (Ctrl-C). Always safe to call twice.
@@ -877,6 +954,10 @@ start_tui() {
   local rows_avail; rows_avail=$(( $(tput lines 2>/dev/null || echo 24) - 12 ))
   [ "$rows_avail" -lt 3 ] && rows_avail=3
 
+  # Render the splash once into a string so each keystroke redraw is cheap (no
+  # re-spawning tput per frame). Same banner the resume path prints.
+  local banner; banner="$(start_banner)"
+
   local filter="" hi=0 off=0 choice=""
   while :; do
     # Build the visible rows: two pinned action rows + filtered branches.
@@ -885,6 +966,7 @@ start_tui() {
     rkind+=("create");   rval+=("")
     local lf; lf="$(printf '%s' "$filter" | tr '[:upper:]' '[:lower:]')"
     for b in "${branches[@]}"; do
+      [ "$b" = "$current" ] && continue                   # already covered by "Continue on …"
       if [ -z "$filter" ] || printf '%s' "$b" | tr '[:upper:]' '[:lower:]' | grep -qF -- "$lf"; then
         rkind+=("branch"); rval+=("$b")
       fi
@@ -895,27 +977,18 @@ start_tui() {
     [ "$hi" -ge $((off+rows_avail)) ] && off=$((hi-rows_avail+1))
 
     # --- render ----------------------------------------------------------
-    # Big bold block-letter banner (pure █ blocks — no backslashes to escape).
     tput clear 2>/dev/null || true
-    printf '\n'
-    printf '%s%s  ██   ██  ██   ██  ██   ██%s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  ███ ███  ██   ██   ██ ██ %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  ██ █ ██  ██   ██    ███  %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  ██   ██  ██   ██   ██ ██ %s\n'                  "$C_ACC" "$C_BOLD" "$C_RST"
-    printf '%s%s  ██   ██   █████   ██   ██%s   %sMULTIPLEXER%s\n' "$C_ACC" "$C_BOLD" "$C_RST" "$C_DIM" "$C_RST"
-    printf '%s  ───────────────────────────────────────%s\n'     "$C_DIM" "$C_RST"
-    printf '%s  on %s%s%s · %s · choose this session'"'"'s branch%s\n' \
-      "$C_DIM" "$C_RST$C_BOLD" "$current" "$C_RST$C_DIM" "$dirty$ahead" "$C_RST"
-    printf '\n'
+    printf '%s\n' "$banner"
+    printf '%s  choose the branch for THIS session%s\n\n' "$C_DIM" "$C_RST"
 
     local i label
     for ((i=off; i<nrows && i<off+rows_avail; i++)); do
       case "${rkind[i]}" in
-        continue) label="▶ Continue on ${rval[i]}" ;;
+        continue) label="▶ Continue on ${rval[i]}  (current)" ;;
         create)   label="✚ Create a new branch…" ;;
-        branch)   label="⌖ ${rval[i]}"; [ "${rval[i]}" = "$current" ] && label="$label  (current)" ;;
+        branch)   label="⌖ Switch to ${rval[i]}" ;;
       esac
-      if [ "$i" -eq "$hi" ]; then printf '   %s%s%-44s ◀%s\n' "$C_ACC" "$C_BOLD" "$label" "$C_RST"
+      if [ "$i" -eq "$hi" ]; then printf '   %s%-46s%s%s ◀%s\n' "$C_BOLD" "$label" "$C_RST" "$C_DIM" "$C_RST"
       else                        printf '   %s%s%s\n' "$C_DIM" "$label" "$C_RST"; fi
     done
 
@@ -1002,20 +1075,26 @@ start_status_loop() {
 cmd_web() {
   command -v python3 >/dev/null 2>&1 || die "mux web needs python3"
 
+  # On a real terminal, open on a clean slate (skipped under the test dry-run so
+  # the non-interactive path stays quiet). The picker uses its own alt-screen.
+  if [ -t 1 ] && [ -z "${MUX_START_DRYRUN:-}" ]; then tput clear 2>/dev/null || true; fi
+
   # --- branch selection (the front door to a session) --------------------
   # Parse the leading args: an optional `--new` forces the prompt; the first
   # positional is a BRANCH name unless it's purely numeric (back-compat: the
-  # historical `mux web <port>` / `mux start <port>` still works).
+  # historical `mux web <port>` still works).
   local force_new="" branch_arg=""
   if [ "${1:-}" = "--new" ]; then force_new=1; shift; fi
   if [ -n "${1:-}" ]; then
     case "$1" in *[!0-9]*) branch_arg="$1"; shift ;; esac
   fi
   if [ -n "$branch_arg" ]; then
-    start_checkout "$branch_arg"                          # mux start <branch> [port]
+    [ -t 1 ] && start_banner                              # banner, then create/checkout
+    start_checkout "$branch_arg"                          # mux web <branch> [port]
   elif [ -t 0 ] && [ -t 1 ] && { [ -n "$force_new" ] || ! session_in_flight; }; then
-    start_tui                                             # fresh start → interactive picker
+    start_tui                                             # fresh start → interactive picker (draws its own banner)
   else
+    [ -t 1 ] && start_banner                              # banner on the in-flight resume too
     local cur; cur="$(git branch --show-current 2>/dev/null || true)"
     [ -n "$cur" ] && echo "▶ continuing on $cur"          # in-flight → zero-friction resume
   fi
@@ -1037,9 +1116,28 @@ cmd_web() {
   # whole tree down too — without it the script orphaned to PID 1 and its
   # output + in-flight claude kept running after the window was gone.
   trap 'kill "$epid" "$wpid" 2>/dev/null; kill_tick; rm -f "$REPO_ROOT"/.mux/run/*.pid' EXIT INT TERM HUP
-  echo "▶ mux web → http://127.0.0.1:$port    (Ctrl-C or closing this window stops UI + output; or run: mux stop)"
+  echo "▶ dashboard live → http://127.0.0.1:$port"
+  if [ -t 1 ]; then
+    printf '%s  Ctrl-C or closing this window stops UI + output · or run: mux stop%s\n' \
+      "$(tput dim 2>/dev/null || true)" "$(tput sgr0 2>/dev/null || true)"
+  else
+    echo "  (Ctrl-C or closing this window stops UI + output; or run: mux stop)"
+  fi
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
-  if [ -z "${MUX_NO_OPEN:-}" ]; then
+  # On a TTY, ASK first — defaulting to NO: only an explicit "y" opens it; a 10s
+  # no-answer (or anything else) declines. The prompt erases itself once resolved.
+  local do_open=1
+  if [ -n "${MUX_NO_OPEN:-}" ]; then
+    do_open=""
+  elif [ -t 0 ] && [ -t 1 ]; then
+    local _wht _rst; _rst="$(tput sgr0 2>/dev/null || true)"
+    _wht="$(tput setaf 15 2>/dev/null || true)"; [ -z "$_wht" ] && _wht="$(tput bold 2>/dev/null || true)"
+    printf '%s  open the browser? [y/N] (auto-no in 10s) %s' "$_wht" "$_rst"
+    local ans=""; IFS= read -rt 10 -n 1 ans 2>/dev/null || ans=""
+    printf '\r%s\r' "$(tput el 2>/dev/null || true)"     # erase the prompt line
+    case "$ans" in [Yy]) do_open=1 ;; *) do_open="" ;; esac
+  fi
+  if [ -n "$do_open" ]; then
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
     [ -n "$opener" ] && ( sleep 0.6; "$opener" "http://127.0.0.1:$port" ) >/dev/null 2>&1 &
   fi
@@ -1053,13 +1151,13 @@ cmd_help() { sed -n '2,/^$/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
 
 # --- dispatch --------------------------------------------------------------
 
-cmd="${1:-status}"; shift || true
+cmd="${1:-web}"; shift || true
 case "$cmd" in
   add)            cmd_add "$@" ;;
   release)        cmd_release "$@" ;;
   unrelease)      cmd_unrelease "$@" ;;
   claim)          cmd_claim "$@" ;;
-  start|web)      cmd_web "$@" ;;
+  web)            cmd_web "$@" ;;
   block)          cmd_block "$@" ;;
   resolve)        cmd_resolve "$@" ;;
   fail)           cmd_fail "$@" ;;
