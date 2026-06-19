@@ -200,12 +200,31 @@ _GOL_SEED = {
     (17, 0), (18, 1), (16, 2), (17, 2), (18, 2),
     (20, 5), (21, 6), (19, 7), (20, 7), (21, 7),
 }
+# Short, fun kickoff phrases riffing on the MULTIPLEXER / channels / signals
+# lingo. 12 entries; gol_frame indexes with a stride coprime to 12 so the
+# banner walks the whole list deterministically without real randomness.
+_GOL_PHRASES = [
+    "switching channels…",
+    "routing the next signal…",
+    "the bus is hot…",
+    "multiplexing resumes…",
+    "patching in a fresh channel…",
+    "crossbar engaged…",
+    "demuxing the queue…",
+    "signal on the wire…",
+    "the executor wakes…",
+    "tapping the stream…",
+    "throughput climbing…",
+    "channels live…",
+]
 
 
 def gol_frame(gen):
-    """Render generation `gen` of the fixed GOL seed as a single multi-line
-    string framed as a dim divider. Toroidal (wrap) edges. Cheap: a tiny grid
-    advanced a few dozen steps, recomputed each poll."""
+    """Render generation `gen` of the fixed GOL seed as a divider for a new
+    cycle. Returns two log items: a bright "▶"-led kickoff banner and the dim
+    multi-line GOL grid block beneath it. Toroidal (wrap) edges. Cheap: a tiny
+    grid advanced a few dozen steps plus a constant phrase lookup, recomputed
+    each poll."""
     cols, rows = _GOL_COLS, _GOL_ROWS
     grid = [[1 if (x, y) in _GOL_SEED else 0 for x in range(cols)]
             for y in range(rows)]
@@ -224,10 +243,16 @@ def gol_frame(gen):
     rule = "─" * (cols + 2)
     body = "\n".join(" " + "".join("█" if c else " " for c in row)
                      for row in grid)
-    # Lead with the recognized "─" divider marker so the whole block picks up
-    # the muted divider styling (class `ls`); the embedded newlines render as
-    # one block because `#log` is `white-space:pre-wrap`.
-    return rule + "\n" + body + "\n" + rule
+    # A fun, accent-styled kickoff banner above the dim grid. Deterministic from
+    # `gen` (no randomness) but visits the whole pool via a stride coprime with
+    # its length (7 vs 12) so consecutive runs jump around and feel random.
+    banner = "▶ " + _GOL_PHRASES[(max(0, gen) * 7) % len(_GOL_PHRASES)]
+    # The grid block leads with the recognized "─" divider marker so it picks up
+    # the muted divider styling (class `ls`); the embedded newlines render as one
+    # block because `#log` is `white-space:pre-wrap`. The banner is a SEPARATE
+    # item leading with "▶" so the UI styles it as its own bright line (class
+    # `lk`) above — not part of — the dim grid div.
+    return [banner, rule + "\n" + body + "\n" + rule]
 
 
 def log_lines(limit=300):
@@ -262,7 +287,7 @@ def log_lines(limit=300):
                 # The number is never shown; we only use it to pick WHICH GOL
                 # generation to render, so successive run dividers play a
                 # flipbook (gen N, N+1, …). cycle 1 → seed (gen 0).
-                out.append(gol_frame(cycle - 1))
+                out.extend(gol_frame(cycle - 1))
                 thinking = False
             elif sub == "thinking_tokens":
                 # Collapse consecutive thinking events into one muted line.

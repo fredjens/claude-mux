@@ -122,7 +122,7 @@ async function refresh(){
   // Object entries are long/multi-line markdown messages: render them inline as
   // formatted markdown (marked.js) instead of dumping raw ## / ** into the log.
   if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
-  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8480;font-size:12.5px'>Idle — waiting for a READY task</div>")
+  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","▶":"lk"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8480;font-size:12.5px'>Idle — waiting for a READY task</div>")
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)

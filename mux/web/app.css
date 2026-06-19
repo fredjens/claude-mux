@@ -45,7 +45,7 @@
  #log .md code{background:#241f1a;padding:1px 4px;border-radius:3px;font-size:12px}
  #log .md pre{background:#241f1a;padding:8px;border-radius:4px;overflow:auto;white-space:pre} #log .md pre code{background:none;padding:0}
  #log .md a{color:var(--accent)} #log .md blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #393736;color:#a8a29e}
- .la{color:#ece6da} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:#5c5650;margin:8px 0;line-height:1.15} .lx{color:#a8a29e} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)}
+ .la{color:#ece6da} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:#5c5650;margin:8px 0;line-height:1.15} .lx{color:#a8a29e} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)} .lk{color:var(--accent);font-weight:600;margin-top:10px}
  #backdrop{position:fixed;inset:0;background:rgba(10,8,6,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
  #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:#1a1815;border-left:1px solid #2a2827;
   display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
