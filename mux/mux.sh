@@ -150,7 +150,7 @@ git_clean() {
 # then `task: <filename>`, then the optional approve note. Goal is meant to be
 # short, so this stays tidy — Details is never included.
 commit_message() {
-  local f="$1" note="${2:-}" slug goal_first goal_rest
+  local f="$1" note="${2:-}" stat="${3:-}" slug goal_first goal_rest
   slug="$(grep -m1 -i '^# Task:' "$f" | sed 's/^# *[Tt]ask:[[:space:]]*//')"
   # The Goal block: every line between "## Goal" and the next "##" heading,
   # dropping leading/trailing blank lines. The first such line is the subject;
@@ -165,6 +165,7 @@ commit_message() {
   [ -n "$goal_rest" ] && printf '\n%s\n' "$goal_rest"
   printf '\ntask: %s' "${f##*/}"
   [ -n "$note" ] && printf '\n\n%s' "$note"
+  [ -n "$stat" ] && printf '\n\n%s' "$stat"
   return 0
 }
 
@@ -356,7 +357,10 @@ cmd_ok() {
   # whether .mux is ignored — then the reset is a harmless no-op — or not.)
   git add -A || die "git add failed"
   git reset -q -- .mux 2>/dev/null || true
-  git commit -q -m "$(commit_message "$f" "$*")" || die "git commit failed"
+  # Diffstat of exactly what's staged (the .mux queue excluded above), so the
+  # commit message is self-describing in `git log` without opening the diff.
+  local stat; stat="$(git diff --cached --stat -- . ':(exclude).mux' 2>/dev/null)"
+  git commit -q -m "$(commit_message "$f" "$*" "$stat")" || die "git commit failed"
   local sha br; sha="$(git rev-parse --short HEAD)"; br="$(git branch --show-current 2>/dev/null || echo '?')"
   # The commit is now the permanent record. Note it in the done.log ledger (so a
   # `# Depends-on:` on this task still resolves even after the file is finally
