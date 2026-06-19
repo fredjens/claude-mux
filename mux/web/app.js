@@ -30,11 +30,15 @@ function golSeed(){const n=GOL.cols*GOL.rows,g=new Uint8Array(n)
  // a genuine Conway run, not a fixed loop replaying the same board.
  for(let i=0;i<n;i++)g[i]=Math.random()<.4?1:0
  GOL.grid=g;GOL.prev=null;GOL.still=0}
-function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
+// One toroidal Conway step over a flat Uint8Array; shared by the header brand
+// mark and the Output-log cycle marker so the Conway rule lives in one place.
+function conwayNext(grid,cols,rows){const n=cols*rows,nx=new Uint8Array(n)
  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){let c=0
   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue
    const yy=(y+dy+rows)%rows,xx=(x+dx+cols)%cols;c+=grid[yy*cols+xx]}
   const i=y*cols+x;nx[i]=grid[i]?(c==2||c==3?1:0):(c==3?1:0)}
+ return nx}
+function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=conwayNext(grid,cols,rows)
  // reseed if empty or unchanged (stable/oscillator-stuck) for a couple of steps
  let alive=0,same=GOL.prev!=null;for(let i=0;i<n;i++){alive+=nx[i];if(GOL.prev&&nx[i]!=GOL.prev[i])same=false}
  GOL.prev=grid;GOL.grid=nx
@@ -50,6 +54,33 @@ function golStart(){if(GOL.timer)return
 // Freeze the mark on its current frame when idle — clears the interval but keeps
 // the canvas visible so it reads as a static logo (never hidden).
 function golStop(){if(GOL.timer){clearInterval(GOL.timer);GOL.timer=null}}
+// Output-log cycle marker: the NEWEST cycle divider is rendered as a larger
+// canvas GOL board that plays a live ~2.5s Conway run once when the cycle first
+// appears, then freezes on its final frame. Its own seed (independent of the
+// server text grid) so it doesn't couple to gol-busier-seed. Older dividers in
+// the scrollback stay as the server's static text grid (frozen final frame).
+const MARK={cols:36,rows:12,grid:null,timer:null,step:0},MARK_STEPS=20
+// lastCycleCount=null until the first refresh has seen the log; that first sight
+// freezes (never animates) any pre-existing newest divider so a page reload
+// doesn't replay history. A later strict increase = a brand-new cycle → animate.
+let lastCycleCount=null
+function markSeed(){const n=MARK.cols*MARK.rows,g=new Uint8Array(n)
+ for(let i=0;i<n;i++)g[i]=Math.random()<.4?1:0;MARK.grid=g}
+function markDraw(){const cv=E("golmark");if(!cv||!MARK.grid)return
+ const ctx=cv.getContext("2d");ctx.clearRect(0,0,MARK.cols,MARK.rows)
+ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--mux-gol-fill").trim()||"#aeb4bf"
+ for(let i=0;i<MARK.cols*MARK.rows;i++)if(MARK.grid[i])ctx.fillRect(i%MARK.cols,(i/MARK.cols)|0,1,1)}
+// Run the one-shot animation: reseed, step every 130ms for ~2.5s, then freeze.
+function markAnimate(){if(MARK.timer){clearInterval(MARK.timer);MARK.timer=null}
+ markSeed();MARK.step=0;markDraw()
+ MARK.timer=setInterval(()=>{MARK.grid=conwayNext(MARK.grid,MARK.cols,MARK.rows);markDraw()
+  if(++MARK.step>=MARK_STEPS){clearInterval(MARK.timer);MARK.timer=null}},130)}
+// Paint the newest marker's current frame onto the (re-rendered) canvas without
+// restarting anything — used on every poll so the freshly rebuilt #log canvas
+// shows the frozen/in-progress frame instead of flashing blank. Seeds+settles a
+// frame on first sight so a reloaded historical marker isn't empty.
+function markFreeze(){if(!MARK.grid){markSeed();for(let i=0;i<MARK_STEPS;i++)MARK.grid=conwayNext(MARK.grid,MARK.cols,MARK.rows)}
+ markDraw()}
 async function act(verb,id,prompt){let text=""
  if(prompt){text=window.prompt(prompt);if(text===null)return}
  try{const r=await fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
@@ -118,11 +149,27 @@ async function refresh(){
  // it on its last frame so it sits there as a static brand mark.
  ts.some(t=>t.executing)?golStart():golStop()
  const lg=await (await fetch("/api/log")).json()
- E("log").innerHTML=lg.slice().reverse().map(l=>{
+ // The server's GOL cycle divider is the only multi-line "─"-led item; the
+ // NEWEST one is upgraded to a live canvas board, older ones stay as text.
+ const isMark=l=>typeof l=="string"&&l[0]=="─"&&l.indexOf("\n")>=0
+ let cycleCount=0,newestIdx=-1
+ lg.forEach((l,i)=>{if(isMark(l)){cycleCount++;newestIdx=i}})
+ E("log").innerHTML=lg.slice().reverse().map((l,ri)=>{
   // Object entries are long/multi-line markdown messages: render them inline as
   // formatted markdown (marked.js) instead of dumping raw ## / ** into the log.
   if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
+  // Newest cycle divider → animated/frozen canvas (with the server text grid as
+  // <canvas> fallback content so a cycle boundary is never invisible).
+  if(isMark(l)&&(lg.length-1-ri)===newestIdx)
+   return `<div class="l golmarkwrap"><canvas id=golmark class=golmark width=${MARK.cols} height=${MARK.rows}>${esc(l)}</canvas></div>`
   const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","▶":"lk"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div class='empty'>Idle — waiting for a READY task</div>")
+ // Animate exactly once per brand-new cycle (strict count increase); on the
+ // first sight and on every other poll just repaint the frozen frame so the 2s
+ // full re-render of #log never restarts or flickers the animation.
+ if(newestIdx>=0){
+  if(lastCycleCount!==null&&cycleCount>lastCycleCount)markAnimate()
+  else markFreeze()
+  lastCycleCount=cycleCount}
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)

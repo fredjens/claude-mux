@@ -38,6 +38,12 @@
  @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
  #log{margin:0;font:12.5px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
  #log .l{padding:1px 0}
+ /* Newest cycle divider rendered as a larger live GOL board (animates ~2.5s
+    then freezes). Bigger/crisper than the old ~24×8 text grid but kept within
+    the log column. Same theme vars as the header brand mark for color parity. */
+ #log .golmarkwrap{margin:10px 0}
+ #log canvas.golmark{display:block;width:min(100%,260px);aspect-ratio:36/12;image-rendering:pixelated;
+  border:1px solid var(--mux-gol-border);border-radius:4px;background:var(--mux-border);opacity:.9}
  /* Long/multi-line assistant messages render inline as formatted markdown. */
  #log .md{white-space:normal;margin:6px 0;padding:8px 10px;background:var(--mux-panel);border-radius:6px;color:var(--mux-text-bright)}
  #log .md>:first-child{margin-top:0} #log .md>:last-child{margin-bottom:0}
