@@ -272,7 +272,17 @@ def log_lines(limit=300):
             if stats:
                 out.append(stats)
             thinking = False
-    return out or [idle_reason() or "Starting…"]
+    # Surface WHY the output is idle as a trailing status line, even when the log
+    # already has content from earlier cycles. idle_reason() is None while a cycle
+    # runs or work is queued, so this only fires when genuinely idle — and a stale
+    # log from a prior run no longer masks the blocking reason (e.g. a dirty tree
+    # holding the queue). "No activity" is the benign empty state; don't spam it.
+    if out:
+        reason = idle_reason()
+        if reason and reason != "No activity":
+            out.append("✗ " + reason)
+        return out
+    return [idle_reason() or "Starting…"]
 
 
 def read_task(name):
