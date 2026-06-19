@@ -223,9 +223,12 @@ async function refresh(){
  const order={RUNNING:0,BLOCKED:1,READY:2,DRAFT:3,DONE:4,COMMITTED:4,FAILED:5}; const rank=s=>order[s]??3; ts.sort((a,b)=>rank(a.status)-rank(b.status))
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">`+
   `${t.next?`<span class=nextlbl>next</span>`:t.status=="RUNNING"?`<span class="runword${t.executing?" live":""}">${t.status}</span>`:t.status}`+
-  `${t.awaiting_answer?" ·awaiting you":""}`+
+  `${t.awaiting_answer?` <span class=awaitbadge>awaiting you</span>`:""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span>${t.file.replace(/\.task\.md$/,"")}</span></div>`+
+  // A BLOCKED task's pending question, shown inline so you can read what it's
+  // asking and answer right here — no opening the file or facing a blind box.
+  `${t.question?`<div class=qask>${esc(t.question)}</div>`:""}`+
   `${buttons(t)}</div>`).join("")||"<div class='empty'>No tasks</div>"
  // Animate the logo only while a task is actively executing; otherwise freeze
  // it on its last frame so it sits there as a static brand mark.

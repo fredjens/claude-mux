@@ -52,9 +52,20 @@ def mux(*args):
 def tasks():
     ok, out = mux("status", "--json")
     try:
-        return json.loads(out) if ok else []
+        ts = json.loads(out) if ok else []
     except json.JSONDecodeError:
         return []
+    # Surface the pending question inline so a BLOCKED task can be read AND
+    # answered straight from the board — no opening the file, no blind prompt box.
+    for t in ts:
+        if t.get("status") == "BLOCKED":
+            p = os.path.join(REPO, ".mux", "tasks", t.get("file", ""))
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    t["question"] = _task_question(fh.read())
+            except OSError:
+                pass
+    return ts
 
 
 def git_dirty_nonmux():
@@ -522,6 +533,25 @@ def _git(*args):
         return r.stdout
     except OSError:
         return ""
+
+
+def _task_question(text):
+    """The prose of the most-recent `## Question (...)` block in a task file —
+    what a BLOCKED task is waiting on you to answer. "" if none. Stops at the next
+    `#`/`##` heading so it returns just the question, not the trailing Answer/etc."""
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if re.match(r"##\s*Question\b", line, re.IGNORECASE):
+            start = i + 1
+    if start is None:
+        return ""
+    body = []
+    for line in lines[start:]:
+        if line.startswith("#"):
+            break
+        body.append(line)
+    return "\n".join(body).strip()
 
 
 def _task_field(text, key):
