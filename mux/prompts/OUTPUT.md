@@ -31,6 +31,26 @@ Status lifecycle of a task:  DRAFT → READY → RUNNING → DONE (or FAILED).
    code), run `mux fail <task> <one-line reason>` and stop.
 8. ONE task at a time — `mux next` guarantees it.
 
+## Cross-cycle notes (`.mux/NOTES.md`)
+You have no in-session memory — each cycle is a fresh process. To keep
+*understanding* across the stateless ticks, the repo carries a small scratch
+file at `.mux/NOTES.md`.
+
+- At the START of a cycle, after `mux next` names a task, READ `.mux/NOTES.md`
+  if it exists. It holds notes left by previous cycles — conventions you
+  discovered, gotchas, why a prior approach was abandoned. Use it as context.
+- At the END of a cycle, BEFORE you stop, if you learned something a future
+  cycle would waste time rediscovering, APPEND a dated bullet to `.mux/NOTES.md`
+  (create the file if it is absent). Keep it terse and durable — facts that
+  outlive this one task, not a play-by-play of what you did. It is fine to prune
+  stale lines; this is a continuity log, not documentation.
+- Two memory systems, two lanes — do not cross them: `.mux/NOTES.md` is
+  operational execution continuity (ephemeral, prunable, in-repo); your NATIVE
+  memory under `~/.claude/.../memory/` is durable curated facts about the
+  user/project. Treat native memory as READ-ONLY context here: write your
+  cross-cycle notes ONLY to `.mux/NOTES.md`, and never create or edit anything
+  under `~/.claude/...`.
+
 ## Scope & safety
 One task = one small, self-contained commit (which `mux ok` makes for you on
 the human's approval — you never commit, so they review every diff BEFORE it

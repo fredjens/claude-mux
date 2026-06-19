@@ -606,7 +606,7 @@ cmd_channel() {
 # What Claude is told to do each headless cycle (one task unit, then exit).
 output_cycle() {
   cat <<'CYCLE'
-You are a headless worker with NO memory between runs. Run `mux next` (bash): it prints the ONE task file to work on, or nothing.
+You are a headless worker with NO in-session memory between runs (each cycle is a fresh process), but `.mux/NOTES.md` carries durable execution notes forward across cycles — read it at the start and append to it at the end (see the OUTPUT prompt). Run `mux next` (bash): it prints the ONE task file to work on, or nothing.
 - If it prints nothing, do NOTHING and stop.
 - Otherwise, if that task is not already RUNNING, claim it with `mux claim <task>`. Then COMPLETE THE ENTIRE TASK in THIS session: do everything its Goal and Details require and run the tests it names. Do NOT stop early or leave it half-done — there is no shared memory between runs, so if you stop, the next run starts over from scratch and makes no progress. Keep working until the task is fully done.
 - NEVER run git and NEVER commit — mux handles that. When the work is fully complete, STOP and leave the task RUNNING; the human reviews your changes and runs `mux ok` to commit them (or discards them).
