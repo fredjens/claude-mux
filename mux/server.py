@@ -189,17 +189,26 @@ def result_summary(ev):
     return "Σ " + " · ".join(segs) if segs else ""
 
 
-# A fixed, deterministic Game of Life seed (gliders that march across a toroidal
-# board so it stays lively and never dies). Rendered as a multi-line text frame
+# A fixed, deterministic Game of Life seed rendered as a multi-line text frame
 # that replaces the old "cycle N" divider; successive run dividers show
 # successive generations, so reading down the log plays a GOL flipbook.
+#
+# The old seed was four sparse gliders that quickly thinned to a handful of
+# drifting blocks — a near-empty board. Instead we start from a dense, fixed
+# pseudo-random bitmap (~42% of cells alive) computed once from a deterministic
+# spatial hash (NO `random` — same grid every run). On the small toroidal board
+# this evolves into a churning soup that stays substantially populated and
+# varied for dozens of generations, so every cycle divider reads as alive and
+# busy rather than empty.
 _GOL_COLS, _GOL_ROWS = 24, 8
 _GOL_SEED = {
-    # three gliders at different offsets — they wrap and keep the board busy
-    (1, 0), (2, 1), (0, 2), (1, 2), (2, 2),
-    (9, 2), (10, 3), (8, 4), (9, 4), (10, 4),
-    (17, 0), (18, 1), (16, 2), (17, 2), (18, 2),
-    (20, 5), (21, 6), (19, 7), (20, 7), (21, 7),
+    (x, y)
+    for y in range(_GOL_ROWS)
+    for x in range(_GOL_COLS)
+    # Deterministic spatial hash → ~40% fill. Mixing three large primes (the
+    # classic xor-hash constants) avoids the visible diagonal banding a plain
+    # `(x + y) % n` would give, so the seed looks irregular/organic.
+    if (x * 73856093 ^ y * 19349663 ^ (x * y) * 83492791) % 10 < 4
 }
 # Short, fun kickoff phrases riffing on the MULTIPLEXER / channels / signals
 # lingo. 12 entries; gol_frame indexes with a stride coprime to 12 so the
