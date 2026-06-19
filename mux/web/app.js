@@ -78,9 +78,9 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
  if(t.status=="DRAFT"&&!auto){b.push(`<button class=primary onclick="act('release','${f}')">Release</button>`)
-  // Drive a DRAFT by hand in a fresh claude session, without releasing it to
-  // the headless tick — the task stays DRAFT on the board.
-  b.push(`<button onclick="direct('${f}')">direct ⇥</button>`)
+  // Open a channel-scoped planner session on a DRAFT to refine it by hand,
+  // without releasing it to the headless tick — the task stays DRAFT on the board.
+  b.push(`<button onclick="direct('${f}')">plan ⇥</button>`)
   // A DRAFT never ran — nothing to discard — so it can be deleted outright.
   b.push(`<button class=danger onclick="if(confirm('Delete this draft task?'))act('delete','${f}')">delete</button>`)}
  // A READY task hasn't been claimed yet, so you can still regret it: pull it

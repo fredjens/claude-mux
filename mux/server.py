@@ -18,6 +18,7 @@ REPO = os.environ.get("MUX_REPO", os.getcwd())
 MUX  = os.environ.get("MUX_BIN", "mux")
 PORT = int(os.environ.get("MUX_PORT", "8770"))   # not 7000: macOS AirPlay uses it
 WEB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")   # vendored marked + theme
+PROMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")  # role prompts (CHANNEL.md, …)
 
 # Provider→theme map: the UI accent + supporting pastels + header label come from
 # ONE place here, so re-skinning for a different output backend = changing/adding
@@ -478,12 +479,16 @@ def spawn_resume(sid):
 
 def spawn_direct(task_file):
     """Open a Terminal.app window running a FRESH interactive claude seeded to
-    work on one DRAFT task. Unlike spawn_resume there is no session to attach to
-    (a DRAFT has never run), so this starts a new session pointed at the task
-    file. INTERACTIVE — the human drives, so no -p/stream-json/skip-permissions;
-    normal permission prompts apply. Launches in PLAN mode (--permission-mode
-    plan) so claude reads and refines the task WITH you instead of immediately
-    executing it — the point of directing a DRAFT is to shape it, not run it.
+    work on one DRAFT task — launched as a CHANNEL-SCOPED planner, matching
+    `mux channel` (NOT a generic plan-mode session). Unlike spawn_resume there
+    is no session to attach to (a DRAFT has never run), so this starts a new
+    session pointed at the task file. INTERACTIVE — the human drives, so no
+    -p/stream-json/skip-permissions; normal permission prompts apply. It runs
+    with the same scoped permissions as a channel: `--setting-sources user`
+    (ignore the target repo's project settings) and an allowedTools list that
+    permits writing/editing ONLY under .mux/** — so the directed session can
+    read the repo and shape the task but CANNOT silently edit source. The
+    CHANNEL system prompt tells it to refine, not execute, the task.
     NOTE: this directed session runs OUTSIDE the headless board — the task stays
     DRAFT and is never auto-claimed or auto-tracked; the operator drives it by
     hand. Returns False if task_file is not a valid existing task basename."""
@@ -495,10 +500,24 @@ def spawn_direct(task_file):
     prompt = (f"Read .mux/tasks/{name}. This is a DRAFT mux task — help me "
               f"refine and shape it (its Goal/Details), don't start working on "
               f"it yet. {name} is the task we're editing.")
-    # ensure_ascii=False keeps non-ASCII (e.g. the em-dash in `prompt`) as literal
-    # UTF-8; the default would emit a `—` escape, which AppleScript can't parse
-    # ("Expected \" but found unknown token") once embedded in the `do script` string.
-    cmd = (f'cd {json.dumps(REPO)} && claude --permission-mode plan '
+    # Read the CHANNEL role prompt the same way mux.sh does: relative to the mux
+    # install (this module's dir), NOT the target repo's CWD. Substitute the
+    # directed name, mirroring cmd_channel's `sed s/__NAME__/.../`.
+    with open(os.path.join(PROMPTS, "CHANNEL.md"), encoding="utf-8") as fh:
+        sysprompt = fh.read().replace("__NAME__", "direct")
+    # Per-session scoped permissions, identical to `mux channel`: ignore project
+    # settings (--setting-sources user) and pre-approve writes ONLY under .mux,
+    # so a stray source edit can't happen silently. Pattern is .mux/** with NO
+    # leading ./ — Claude Code normalizes paths to project-root-relative.
+    # ensure_ascii=False keeps non-ASCII (e.g. the em-dash in `prompt`/sysprompt)
+    # as literal UTF-8; the default would emit a `—` escape, which AppleScript
+    # can't parse ("Expected \" but found unknown token") once embedded in the
+    # `do script` string.
+    cmd = (f'cd {json.dumps(REPO)} && claude '
+           f'--setting-sources user '
+           f'--permission-mode default '
+           f"--allowedTools 'Read' 'Glob' 'Grep' 'Bash' 'Write(.mux/**)' 'Edit(.mux/**)' "
+           f'--append-system-prompt {json.dumps(sysprompt, ensure_ascii=False)} '
            f'{json.dumps(prompt, ensure_ascii=False)}').replace('"', '\\"')
     script = (
         'tell application "Terminal"\n'
