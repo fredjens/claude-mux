@@ -24,11 +24,14 @@
  #autobtn.on{border-color:var(--accent);color:var(--accent)}
  button.primary{background:var(--accent);border-color:var(--accent);color:#1a1815;font-weight:600}
  button.primary:hover{filter:brightness(1.12);color:#1a1815}
+ button.ok{background:var(--ok);border-color:var(--ok);color:#1a1815;font-weight:600}
+ button.ok:hover{filter:brightness(1.12);color:#1a1815}
  .run{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:12px}
  .shimmer{background:linear-gradient(90deg,#6b655c 0%,#a39a8c 20%,#f0ece4 50%,#a39a8c 80%,#6b655c 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:shimmer 1.6s linear infinite}
  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
  .plan{margin:6px 0 0;padding:8px 10px;background:#13110e;border-radius:6px;color:#a89e8e;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto}
  .acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+ .acts button{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px 4px}
  #gol{display:inline-block;width:16px;height:16px;flex:none;border:1px solid #3a3a3a;border-radius:3px;background:#333;image-rendering:pixelated;opacity:.85}
  #working{font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:0 0 8px;min-height:0}
  #working:empty{margin:0}
@@ -57,7 +60,7 @@
 </style>
 <header><canvas id=gol width=10 height=10></canvas><b>MULTIPLEXER</b><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: auto-release every DRAFT and auto-approve finished tasks">Auto mode: …</button>
- <button class=primary onclick="channel()">+ channel</button></header>
+ <button class=primary onclick="channel()">channel +</button></header>
 <main>
  <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
  <section><h2 class=phead>Output</h2><div id=working></div><pre id=log></pre></section>
@@ -145,13 +148,13 @@ async function toggleAuto(){try{const r=await fetch("/api/auto",{method:"POST",
   auto=(await r.json()).enabled}catch(e){alert("auto toggle failed: "+e)}
  drawAuto();refresh()}
 function buttons(t){const b=[],f=t.file
- if(t.status=="DRAFT"&&!auto){b.push(`<button onclick="act('release','${f}')">Release</button>`)
+ if(t.status=="DRAFT"&&!auto){b.push(`<button class=primary onclick="act('release','${f}')">Release</button>`)
   // Drive a DRAFT by hand in a fresh claude session, without releasing it to
   // the headless tick — the task stays DRAFT on the board.
   b.push(`<button onclick="direct('${f}')">direct ⇥</button>`)}
  if(t.status=="RUNNING"){
   if(t.executing)return ""
-  if(!auto)b.push(`<button class=primary onclick="act('ok')">Approve</button>`)
+  if(!auto)b.push(`<button class=ok onclick="act('ok')">Approve</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
  // FAILED is terminal & already discarded — the only way forward is to clear it
