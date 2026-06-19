@@ -2,6 +2,13 @@
  header{padding:10px 16px;background:var(--mux-bg);border-bottom:1px solid var(--mux-border);display:flex;gap:12px;align-items:center}
  header b{color:#ffffff;font-weight:600;font-family:var(--mux-sans)} header .sp{flex:1} button{font-family:var(--mux-sans);font-size:12px;cursor:pointer;border:1px solid var(--mux-border);
   background:transparent;color:var(--mux-text-dim);border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:var(--mux-text)}
+ /* Brand lockup: GoL mark + wordmark are one unit, spaced tight (7px) so they
+    cohere as a logo. The header's 12px gap then separates the lockup from the
+    .hdiv hairline and the provider/repo metadata that follows. */
+ header .brand{display:inline-flex;align-items:center;gap:10px}
+ header .brand b{letter-spacing:.04em}
+ header .brand #gol{opacity:1}
+ header .hdiv{align-self:stretch;width:1px;background:var(--mux-border);margin:2px 0}
  #provider,#repo{font-family:var(--mux-sans)}
  #provider{color:var(--mux-text-muted);white-space:nowrap}
  .branch{font-size:12px;color:var(--mux-text-dim);white-space:nowrap}
