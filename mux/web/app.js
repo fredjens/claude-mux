@@ -17,9 +17,21 @@ async function pollStatus(){try{const s=await (await fetch("/api/status")).json(
    // Re-sync start only on a new cycle or first sight, so the local counter
    // stays smooth instead of jumping each poll.
    if(work.start===null||Math.abs(base-work.start)>3000)work.start=base
-   work.known=s.elapsed!=null}}
+   work.known=s.elapsed!=null}
+  drawBranch(s.git)}
  catch(e){}
  drawWork()}
+// Branch chip: which branch this session commits to, plus how far it's ahead
+// (↑ unpushed) / behind (↓) the upstream — quiet (just the name) when in sync,
+// a muted "no upstream" hint on a fresh branch. Reflects the last fetch.
+function drawBranch(g){const el=E("branch");if(!el)return
+ if(!g||!g.branch){el.innerHTML="";return}
+ let extra=""
+ if(!g.upstream)extra=' <span class=branch-sub>no upstream</span>'
+ else{if(g.ahead>0)extra+=' <span class=branch-ahead>↑'+g.ahead+'</span>'
+  if(g.behind>0)extra+=' <span class=branch-behind>↓'+g.behind+'</span>'}
+ if(g.dirty>0)extra+=' <span class=branch-dirty>±'+g.dirty+'</span>'
+ el.innerHTML=esc(g.branch)+extra}
 // Conway's Game of Life brand mark in the header. Toroidal so it never settles
 // into a static board; reseeds if it empties or stalls. Always visible as a
 // logo: it animates while a task is executing and freezes on its last frame

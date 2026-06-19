@@ -69,6 +69,45 @@ def git_dirty_nonmux():
     return False
 
 
+def git_branch_state():
+    """The current branch and its push/pull standing vs upstream, for the header
+    chip. Read-only and defensive — mirrors git_dirty_nonmux: it must never raise,
+    so every git call is guarded and falls back to a safe dict.
+
+    Returns {"branch": <name>, "upstream": <bool>, "ahead": <int|null>,
+    "behind": <int|null>, "dirty": <int>}. branch is "(detached)" on a detached
+    HEAD. ahead/behind are null when there is no upstream; otherwise counted as of
+    the LAST fetch (we never auto-fetch here), so "behind" may be stale — that's
+    acceptable. dirty is the count of changed files OUTSIDE .mux/ (same rule as
+    git_dirty_nonmux: the .mux/ queue is metadata, never counts as work)."""
+    safe = {"branch": "", "upstream": False, "ahead": None, "behind": None,
+            "dirty": 0}
+    try:
+        st = subprocess.run(["git", "status", "--porcelain"], cwd=REPO,
+                           capture_output=True, text=True)
+        dirty = sum(1 for ln in st.stdout.splitlines()
+                    if (p := ln[3:]) and not (p == ".mux" or p.startswith(".mux/")))
+        safe["dirty"] = dirty
+        r = subprocess.run(["git", "branch", "--show-current"], cwd=REPO,
+                           capture_output=True, text=True)
+        branch = r.stdout.strip()
+        safe["branch"] = branch if branch else "(detached)"
+        u = subprocess.run(["git", "rev-parse", "--abbrev-ref",
+                            "--symbolic-full-name", "@{u}"], cwd=REPO,
+                           capture_output=True, text=True)
+        if u.returncode != 0:
+            return safe
+        c = subprocess.run(["git", "rev-list", "--left-right", "--count",
+                            "@{u}...HEAD"], cwd=REPO, capture_output=True, text=True)
+        if c.returncode != 0:
+            return safe
+        behind, ahead = c.stdout.split()
+        return {"branch": safe["branch"], "upstream": True,
+                "ahead": int(ahead), "behind": int(behind), "dirty": dirty}
+    except (OSError, ValueError):
+        return safe
+
+
 def auto_enabled():
     """True when auto mode is ON — persisted as the EXISTENCE of .mux/auto (on
     disk so it survives restart, inside .mux/ so it never counts as work)."""
@@ -127,12 +166,12 @@ def status():
     since the lock dir was created (its mtime), or None if unreadable/idle."""
     lock = os.path.join(REPO, ".mux", "tick.lock")
     if not os.path.isdir(lock):
-        return {"executing": False, "elapsed": None}
+        return {"executing": False, "elapsed": None, "git": git_branch_state()}
     try:
         elapsed = int(time.time() - os.path.getmtime(lock))
     except OSError:
         elapsed = None
-    return {"executing": True, "elapsed": elapsed}
+    return {"executing": True, "elapsed": elapsed, "git": git_branch_state()}
 
 
 def _clip(s):

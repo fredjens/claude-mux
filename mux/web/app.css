@@ -4,6 +4,12 @@
   background:transparent;color:var(--mux-text-dim);border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:var(--mux-text)}
  #provider,#repo{font-family:var(--mux-sans)}
  #provider{color:var(--mux-text-muted);white-space:nowrap}
+ .branch{font-size:12px;color:var(--mux-text-dim);white-space:nowrap}
+ .branch:empty{display:none}
+ .branch .branch-ahead{color:var(--accent);font-weight:600;margin-left:1px}
+ .branch .branch-behind{color:var(--mux-text-muted);font-weight:600;margin-left:1px}
+ .branch .branch-sub{color:var(--mux-text-muted)}
+ .branch .branch-dirty{color:var(--mux-code-accent);font-weight:600;margin-left:1px}
  main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
  /* Narrow viewport: stack Queue above Output and let the page scroll
     instead of squeezing two columns. Drop the fixed viewport height so the
