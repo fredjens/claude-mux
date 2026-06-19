@@ -72,7 +72,7 @@
  .lk::before,.lk::after{content:"";flex:1;height:1px;background:var(--mux-divider)}
  .empty{color:var(--mux-text-muted);font-size:12.5px}
  #backdrop{position:fixed;inset:0;background:var(--mux-backdrop);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
- #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:var(--mux-bg);border-left:1px solid var(--mux-border);
+ #drawer{position:fixed;top:0;right:0;height:100vh;width:75vw;background:var(--mux-bg);border-left:1px solid var(--mux-border);
   display:flex;flex-direction:column;transform:translateX(100%);transition:transform .2s ease;z-index:41;box-shadow:-12px 0 30px rgba(0,0,0,.4)}
  body.drawer-open #backdrop{opacity:1;pointer-events:auto}
  body.drawer-open #drawer{transform:translateX(0)}

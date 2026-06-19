@@ -465,22 +465,44 @@ def _task_field(text, key):
     return ""
 
 
+def _diff_file_path(line):
+    """The clean path to show for a `diff --git …` header. Handles the normal
+    `a/<p> b/<p>` form (use the b-side / new name), the synthetic
+    `diff --git untracked <path>` block, and any other tail gracefully."""
+    rest = line[len("diff --git "):]
+    if rest.startswith("untracked "):
+        return rest[len("untracked "):]
+    m = re.match(r"a/(.*) b/(.*)$", rest)
+    if m:
+        return m.group(2)
+    return rest
+
+
 def _diff_html(diff_text):
     """Color a unified diff as escaped HTML lines: added green, removed red, hunk
-    + file + meta headers muted, context plain. Each line is its own <span> so the
-    enclosing <pre> lays them out; empty lines keep height via &nbsp;."""
+    headers accented, context plain. Each `diff --git` line becomes a PROMINENT
+    file-header bar (clean path, section-heading styling); the redundant per-file
+    meta noise that follows it (index/---/+++/mode) is dropped. Each line is its
+    own block <span> so the enclosing <pre> lays them out."""
     rows = []
+    seen_file = False
     for line in diff_text.split("\n"):
-        if line.startswith("--- ") or line.startswith("+++ "):
-            cls = "dh"          # file marker
-        elif line.startswith("@@"):
+        if line.startswith("diff --git ") or line.startswith("diff --cc "):
+            cls = "dfile" if seen_file else "dfile first"
+            seen_file = True
+            rows.append(f'<span class="{cls}">{escape(_diff_file_path(line))}</span>')
+            continue
+        if (line.startswith("--- ") or line.startswith("+++ ") or
+                line.startswith("index ") or line.startswith("old mode") or
+                line.startswith("new mode") or line.startswith("new file") or
+                line.startswith("deleted file") or line.startswith("rename ") or
+                line.startswith("copy ") or line.startswith("similarity ") or
+                line.startswith("dissimilarity ")):
+            continue            # redundant per-file meta — the path bar conveys it
+        if line.startswith("@@"):
             cls = "dk"          # hunk header
-        elif (line.startswith("diff ") or line.startswith("index ") or
-              line.startswith("new file") or line.startswith("deleted file") or
-              line.startswith("rename ") or line.startswith("similarity ") or
-              line.startswith("old mode") or line.startswith("new mode") or
-              line.startswith("Binary files")):
-            cls = "dm"          # meta
+        elif line.startswith("Binary files"):
+            cls = "dm"          # meta worth keeping
         elif line.startswith("+"):
             cls = "da"          # added
         elif line.startswith("-"):
@@ -488,7 +510,9 @@ def _diff_html(diff_text):
         else:
             cls = "dc"          # context
         rows.append(f'<span class="{cls}">{escape(line) or "&nbsp;"}</span>')
-    return "\n".join(rows)
+    # Spans are display:block, so join with no separator — a literal "\n" inside
+    # the white-space:pre <pre> would render as an extra blank row per line.
+    return "".join(rows)
 
 
 def _untracked_block(path):
@@ -511,12 +535,20 @@ def _untracked_block(path):
     return header + "\n" + body
 
 
-def _diff_page(title, meta_chips_html, diff_text, empty_msg="(no changes)"):
+def _diff_page(title, meta_chips_html, diff_text, empty_msg="(no changes)", message=None):
     """A styled, read-only diff document reusing the _md_page dark theme look, but
     with a monospace <pre> of per-line-colored diff text. `title` is plain text,
-    `meta_chips_html` is trusted inline HTML, `diff_text` is the raw unified diff."""
+    `meta_chips_html` is trusted inline HTML, `diff_text` is the raw unified diff.
+    `message`, when given (a COMMITTED task's commit message), renders as a compact
+    line-clamped prose block between the chips and the diff, expandable via a
+    self-contained <details> (no JS) — the diff stays the dominant content."""
     body = _diff_html(diff_text) if diff_text.strip() else \
         f'<span class=dc>{escape(empty_msg)}</span>'
+    msg_html = ""
+    if message and message.strip():
+        msg_html = (f'<details class=cmsg><summary>'
+                    f'<span class=cmsgtext>{escape(message.strip())}</span>'
+                    f'<span class=cmsgmore></span></summary></details>')
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <link rel=stylesheet href="/web/theme.css">
 <style>body{{margin:0;background:var(--mux-bg);color:var(--mux-text)}}
@@ -524,19 +556,33 @@ def _diff_page(title, meta_chips_html, diff_text, empty_msg="(no changes)"):
  .wrap{{box-sizing:border-box;max-width:120ch;margin:0 auto;padding:40px 36px 96px;min-height:100vh}}
  .title{{font:600 22px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:var(--mux-text-strong);
   letter-spacing:-.01em}}
- .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:var(--mux-text-muted);margin:7px 0 24px;
+ .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:var(--mux-text-muted);margin:7px 0 18px;
   padding-bottom:16px;border-bottom:1px solid var(--mux-border)}}
  .meta b{{color:var(--mux-text-dim);font-weight:600}}
- pre.diff{{font:12.5px/1.6 ui-monospace,Menlo,monospace;background:var(--mux-panel);
+ .cmsg{{margin:0 0 18px}}
+ .cmsg summary{{list-style:none;cursor:pointer;display:block}}
+ .cmsg summary::-webkit-details-marker{{display:none}}
+ .cmsgtext{{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  font:13px/1.5 var(--mux-sans);color:var(--mux-text-muted);white-space:pre-wrap}}
+ .cmsg[open] .cmsgtext{{-webkit-line-clamp:unset;overflow:visible}}
+ .cmsgmore{{font:11.5px/1.6 var(--mux-sans);color:var(--mux-text-dim)}}
+ .cmsgmore::after{{content:"show more"}}
+ .cmsg[open] .cmsgmore::after{{content:"show less"}}
+ pre.diff{{font:12.5px/1.45 ui-monospace,Menlo,monospace;background:var(--mux-panel);
   border:1px solid var(--mux-border-faint);border-radius:8px;padding:14px 16px;margin:0;
   overflow:auto;white-space:pre;tab-size:4}}
  pre.diff span{{display:block}}
- .da{{color:#aed99a}} .dr{{color:#e8a0ac}}
- .dk{{color:var(--mux-code-accent)}} .dh{{color:var(--mux-text-dim);font-weight:600}}
+ .dfile{{margin:22px -16px 6px;padding:7px 16px;background:var(--mux-chip);
+  border-top:1px solid var(--mux-border-strong);color:var(--mux-text-strong);
+  font-weight:600;font-size:13px}}
+ .dfile.first{{margin-top:0;border-top:0}}
+ .da{{color:#aed99a;background:rgba(120,200,90,.09)}}
+ .dr{{color:#e8a0ac;background:rgba(230,120,140,.10)}}
+ .dk{{color:var(--mux-code-accent)}}
  .dm{{color:var(--mux-text-muted)}} .dc{{color:var(--mux-text)}}</style>
 <div class=wrap><div class=title>{escape(title)}</div>
 <div class=meta>{meta_chips_html}</div>
-<pre class=diff>{body}</pre></div>"""
+{msg_html}<pre class=diff>{body}</pre></div>"""
 
 
 def diff_page(name):
@@ -555,8 +601,14 @@ def diff_page(name):
     if status == "COMMITTED":
         sha = _task_field(text, "Commit")
         chips = (f"<b>status</b> COMMITTED  ·  <b>commit</b> {escape(sha)}")
-        diff = _git("show", sha) if re.fullmatch(r"[0-9a-f]{7,40}", sha or "") else ""
-        return _diff_page(title, chips, diff, "(commit not found)")
+        if re.fullmatch(r"[0-9a-f]{7,40}", sha or ""):
+            # `--format=` suppresses the commit/author/date/message header; the
+            # diff body then starts at the first `diff --git`, like the RUNNING case.
+            diff = _git("show", "--format=", sha).lstrip("\n")
+            message = _git("show", "-s", "--format=%B", sha).strip()
+        else:
+            diff, message = "", ""
+        return _diff_page(title, chips, diff, "(commit not found)", message=message or None)
     # Default / RUNNING: the pending working-tree change, queue always excluded.
     chips = (f"<b>status</b> {escape(status)}  ·  working tree vs HEAD "
              f"<b>(.mux excluded)</b>")
