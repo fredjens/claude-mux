@@ -17,6 +17,10 @@
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:var(--mux-text-muted)}
  .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
  .READY,.DONE,.DRAFT{color:var(--mux-text-muted)} .t .nm{color:var(--mux-text);margin:2px 0;cursor:pointer}
+ .t .st .dot{display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;background:var(--accent);vertical-align:middle}
+ .t .st .dot.live{animation:dotpulse 2s ease-in-out infinite}
+ @keyframes dotpulse{0%,100%{opacity:.45;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+ .t .st .nextlbl{color:var(--accent)}
  .t .nm:hover{color:var(--accent);text-decoration:underline}
  button.danger{color:var(--mux-text-muted)} button.danger:hover{border-color:var(--danger);color:var(--danger)}
  #autobtn.on{border-color:var(--accent);color:var(--accent)}

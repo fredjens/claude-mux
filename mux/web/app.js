@@ -140,8 +140,10 @@ function buttons(t){const b=[],f=t.file
 async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()
  const order={RUNNING:0,BLOCKED:1,READY:2,DRAFT:3,DONE:4,COMMITTED:4,FAILED:5}; const rank=s=>order[s]??3; ts.sort((a,b)=>rank(a.status)-rank(b.status))
- E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
-  `${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
+ E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">`+
+  `${t.status=="RUNNING"?`<span class="dot${t.executing?" live":""}"></span>`:""}`+
+  `${t.next?`<span class=nextlbl>next</span>`:t.status}`+
+  `${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span>${t.file.replace(/\.task\.md$/,"")}</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div class='empty'>No tasks</div>"
