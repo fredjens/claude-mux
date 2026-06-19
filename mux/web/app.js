@@ -195,7 +195,10 @@ function buttons(t){const b=[],f=t.file
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  // A landed task keeps a Diff affordance so you can re-check what it committed.
  if(t.status=="COMMITTED")b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
- if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
+ if(t.status=="BLOCKED"){b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
+  // A parked question you've decided not to answer can be cleared off the board.
+  // mux refuses this if the blocked task left uncommitted edits (revert first).
+  b.push(`<button class=danger onclick="if(confirm('Delete this blocked task?'))act('delete','${f}')">delete</button>`)}
  // FAILED is terminal & already discarded — the only way forward is to clear it
  // off the board. (If it kept a session, the resume button below also appears.)
  if(t.status=="FAILED")b.push(`<button class=danger onclick="if(confirm('Delete this failed task?'))act('delete','${f}')">delete</button>`)
@@ -208,8 +211,11 @@ function buttons(t){const b=[],f=t.file
  if(t.session&&!t.executing){
   const stuck=t.awaiting_answer||t.interrupted||t.status=="FAILED"
   const awaiting=t.status=="RUNNING"&&!stuck
+  // BLOCKED → "chat ⇥": you're answering a question, so frame it as a conversation.
+  // Other stuck (interrupted/FAILED) → "resume ⇥"; healthy RUNNING → "direct ⇥".
+  const label=t.status=="BLOCKED"?"chat":stuck?"resume":"direct"
   if(stuck||awaiting)
-   b.push(`<button onclick="resume('${t.session}')">${stuck?"resume":"direct"} ⇥</button>`)}
+   b.push(`<button onclick="resume('${t.session}')">${label} ⇥</button>`)}
  return `<div class=acts>${b.join("")}</div>`}
 async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()

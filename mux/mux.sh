@@ -76,6 +76,9 @@ mkdir -p .mux/tasks
 shopt -s nullglob
 
 TASKS=.mux/tasks
+# The one rolling output tick log (claude stream-json). Defined once so helpers
+# like session_from_log read the same path cmd_tick writes to.
+LOG=.mux/log/output.jsonl
 # Append-only ledger of approved (committed, then deleted) task filenames, so a
 # `# Depends-on:` pointing at a deleted task still resolves. Lives under .mux,
 # so it's never committed (cmd_ok does `git reset -q -- .mux`).
@@ -214,12 +217,31 @@ mark_interrupted() {
   grep -qi '^# Interrupted:' "$found" || append_block "$found" "# Interrupted: $(stamp)"
 }
 
-# Pin a tick's claude session id onto the single RUNNING task, so a stuck task
-# can be resumed interactively later (the rolling log tail won't still hold it).
-# Same defensive stance as mark_interrupted: act only when exactly one task is
-# RUNNING, never error. Unlike mark_interrupted, REPLACE any prior `# Session:`
-# line — a task can be ticked more than once; keep only the latest id. The id is
-# validated to look like a session id so a stray log line can't poison the file.
+# The current tick's claude session id, read from the live rolling log (the
+# `init` event emits it at the very start of a tick, long before any tool call).
+# Lets block/fail pin the session WHILE the tick is still running — see below.
+session_from_log() {
+  grep -o '"session_id":"[0-9a-f-]\{36\}"' "$LOG" 2>/dev/null \
+    | tail -n1 | sed 's/.*"session_id":"\(.*\)"/\1/'
+}
+
+# REPLACE any prior `# Session:` line on a specific task file with this id, so a
+# stuck task can be resumed/chatted interactively later (the rolling log tail
+# won't still hold it). A task can be ticked more than once; keep only the latest
+# id. The id is validated to look like a session id so a stray log line can't
+# poison the file; a non-id (or empty) is a silent no-op.
+pin_session() {
+  local f="$1" id="$2"
+  printf '%s' "$id" | grep -Eqi '^[0-9a-f-]{36}$' || return 0
+  grep -vi '^# Session:' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  append_block "$f" "# Session: $id"
+}
+
+# Pin a tick's session id onto the single RUNNING task, after the tick ends.
+# Defensive like mark_interrupted: act only when exactly one task is RUNNING,
+# never error. This covers a task left RUNNING (awaiting approval); a task that
+# blocked/failed mid-tick is no longer RUNNING here, so block/fail pin it
+# themselves at transition time (via session_from_log) instead.
 record_session() {
   local id="$1" f found="" n=0
   printf '%s' "$id" | grep -Eqi '^[0-9a-f-]{36}$' || return 0
@@ -227,8 +249,7 @@ record_session() {
     if [ "$(task_status "$f")" = RUNNING ]; then found="$f"; n=$((n+1)); fi
   done
   [ "$n" -eq 1 ] || return 0
-  grep -vi '^# Session:' "$found" > "$found.tmp" && mv "$found.tmp" "$found"
-  append_block "$found" "# Session: $id"
+  pin_session "$found" "$id"
 }
 
 # The branch to return to when a session ends. Explicit MUX_BASE wins, then a
@@ -298,6 +319,10 @@ cmd_block() {
   set_status "$f" BLOCKED
   append_block "$f" "## Question ($(stamp))
 $*"
+  # Pin the live tick's session NOW: after the tick ends this task is no longer
+  # RUNNING, so record_session would skip it — leaving a blocked task with no
+  # session to chat/resume, exactly when you most want one.
+  pin_session "$f" "$(session_from_log)"
   echo "⏸ ${f##*/}  RUNNING → BLOCKED (loop keeps going on other tasks)"
 }
 
@@ -338,6 +363,9 @@ cmd_fail() {
   discard_changes
   set_status "$f" FAILED
   append_block "$f" "# Reason: $*"
+  # Same as cmd_block: pin the live tick's session before the tick ends, so a
+  # self-failed task is still resumable (record_session would skip it post-tick).
+  pin_session "$f" "$(session_from_log)"
   echo "✗ ${f##*/}  RUNNING → FAILED  (changes discarded)"
 }
 
@@ -354,16 +382,20 @@ cmd_revert() {
 # FAILED task may be deleted — its changes are already discarded, so there is
 # nothing left to lose; any other state must go through the lifecycle first.
 # Delete a task file outright. Allowed only from a state with nothing to lose:
-# DRAFT (never ran), FAILED (already discarded), or COMMITTED (work is already
+# DRAFT (never ran), FAILED (already discarded), COMMITTED (work is already
 # committed and in done.log — an escape hatch to clear it off the board by hand
-# when you pushed elsewhere). A READY/RUNNING/BLOCKED task is refused —
-# unrelease/revert/fail it first.
+# when you pushed elsewhere), or BLOCKED (parked on a question you've decided not
+# to answer). A READY/RUNNING task is refused — unrelease/revert/fail it first.
+# A BLOCKED task can still hold its own partial edits in the tree; refuse then so
+# delete can't silently nuke uncommitted work (revert/resolve it instead). A
+# clean tree means nothing to lose, so it's safe.
 cmd_delete() {
   [ $# -ge 1 ] || die "usage: mux delete <id>"
   local f st; f="$(resolve_id "$1")"; st="$(task_status "$f")"
   case "$st" in
     DRAFT|FAILED|COMMITTED) ;;
-    *) die "${f##*/} is $st — only a DRAFT, FAILED, or COMMITTED task can be deleted" ;;
+    BLOCKED) git_clean || die "${f##*/} is BLOCKED with uncommitted changes — revert or resolve it first" ;;
+    *) die "${f##*/} is $st — only a DRAFT, FAILED, COMMITTED, or BLOCKED task can be deleted" ;;
   esac
   rm -f "$f"
   echo "🗑 ${f##*/} deleted"
@@ -629,7 +661,7 @@ to_seconds() { case "$1" in *h) echo $(( ${1%h} * 3600 ));; *m) echo $(( ${1%m} 
 cmd_tick() {
   mkdir -p .mux/log .mux/run
   mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
-  local log=.mux/log/output.jsonl        # ONE rolling log — never blanks between tasks
+  local log="$LOG"                       # ONE rolling log — never blanks between tasks
   # Run claude in the BACKGROUND and record its pid (.mux/run/tick.pid) so a
   # stopper (kill_tick) can find and halt THIS tick's claude — otherwise the
   # grandchild outlives a `kill` of the loop and keeps editing the tree. We then

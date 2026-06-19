@@ -1,8 +1,6 @@
-<img src="docs/banner.svg" alt="Claude MUX — parallel channels feed a mux; you are the select signal, the loop is the clock, the output is a commit." width="100%">
-
 <div align="center">
 
-**A multiplexer for [Claude Code](https://claude.com/claude-code).**
+**Multiplexer** — a multiplexer for [Claude Code](https://claude.com/claude-code).
 
 Many minds plan in parallel. One builds. You approve every commit.
 
@@ -12,9 +10,11 @@ Many minds plan in parallel. One builds. You approve every commit.
 
 </div>
 
+<img src="docs/multiplexer.png" alt="The Multiplexer web UI: the QUEUE panel on the left lists task files with per-state action buttons, the read-only live Output panel is on the right, and the MULTIPLEXER brand sits top-left." width="100%">
+
 ## What it is
 
-Claude MUX splits Claude Code into two roles connected by a queue:
+Multiplexer splits Claude Code into two roles connected by a queue:
 
 - **Channels** — read-only sessions that explore the repo and write _task
   files_. Run as many as you like, in parallel. They cannot touch your source.
@@ -38,8 +38,8 @@ One checkout, symlinked onto your PATH **once**, works in every repo:
 
 ```bash
 # one-time: link the `mux` command onto your PATH
-git clone <this-repo> ~/code/claude-mux
-~/code/claude-mux/install.sh        # symlinks `mux` into ~/.local/bin
+git clone <this-repo> ~/code/multiplexer
+~/code/multiplexer/install.sh       # symlinks `mux` into ~/.local/bin
 
 # then, in ANY git repo:
 mux channel          # open a channel — as many as you like
@@ -71,13 +71,14 @@ opens in its own terminal.
 
 The page has two panels and one button:
 
-- **Tasks** (left) — the queue. Each task shows the one action its state
-  allows: `release` (DRAFT → READY), `approve` / `revert` (a finished RUNNING
-  task), or `answer` (a BLOCKED one). Click a task's name to open its plan.
-- **Output — live** (right) — the worker's log, **read-only**. You watch it;
+- **Queue** (left) — the queue of task files. Each task shows the one action its
+  state allows: `release` (DRAFT → READY), `approve` / `revert` (a finished
+  RUNNING task), or `answer` (a BLOCKED one). Click a task's name to open its plan.
+- **Output** (right) — the worker's live log, **read-only**. You watch it;
   you never type into it.
-- **+ channel** (top-right) — opens a **new terminal window** with a channel
-  session. You converse with it there to draft tasks; it can't run in the browser.
+- **Task +** (beside the Queue heading) — opens a **new terminal window** with a
+  channel session. You converse with it there to draft tasks; it can't run in the
+  browser.
 
 So the loop, end to end:
 
