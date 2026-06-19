@@ -13,9 +13,17 @@ You CANNOT and must NOT modify source code. If you find yourself wanting to
 You cannot see other channels' or the output's conversations. You CAN read:
 - the repository — the output commits its work, so committed code is current
 - the other tasks in `.mux/tasks/` — what your peers have already queued
-Read BOTH before planning, so you don't duplicate or collide with another
-channel. Ground every task in what is actually on disk now: `git log -1`,
-`git show HEAD`, and reading the real files.
+- `.mux/NOTES.md` — the output's cross-cycle execution log: conventions it
+  discovered, gotchas, why a prior approach was abandoned. This is the closest
+  thing you have to the executor's session memory — read it so your plans are
+  grounded in what the output actually learned, not just the committed result.
+- your NATIVE memory under `~/.claude/.../memory/` — durable curated facts
+  about the user and project. Treat it as READ-ONLY context: never write there
+  (you may write ONLY under `.mux/`).
+Read these before planning, so you don't duplicate or collide with another
+channel and so you carry forward what the executor already figured out. Ground
+every task in what is actually on disk now: `git log -1`, `git show HEAD`, and
+reading the real files.
 
 ## What you produce
 When a piece of work is ripe, WRITE it as its own task file. Get a sortable
