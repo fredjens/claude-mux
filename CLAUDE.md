@@ -15,7 +15,7 @@ Task files are the single source of truth. Every state change goes through the
 
 - `mux/mux.sh` — the CLI ("verb layer"): the only sanctioned way to change a
   task's state. Verbs dispatch to `cmd_*` functions (see the `case` at the
-  bottom): `add`, `release`, `claim`, `block`, `resolve`, `ok`,
+  bottom): `add`, `release`, `unrelease`, `claim`, `block`, `resolve`, `ok`,
   `changes`, `revert`, `fail`, `show`, `status`/`ls`, `board`, `next`,
   `channel`, `web`/`start`, `output`, `tick`, `stop`, `help`. The top-of-file
   comment block is the canonical usage reference.

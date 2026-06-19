@@ -22,6 +22,7 @@
 #   mux next                    the one task the output should run now
 #   mux show     <id>           print a task file
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
+#   mux unrelease <id>          READY  -> DRAFT   (regret it before it starts)
 #   mux claim    <id>           READY  -> RUNNING (output claims it; not for you)
 #                               (in auto mode the executor also claims DRAFTs in
 #                               place — no DRAFT->READY rewrite)
@@ -322,10 +323,16 @@ cmd_revert() {
 # Permanently remove a dead task file so it stops cluttering the board. Only a
 # FAILED task may be deleted — its changes are already discarded, so there is
 # nothing left to lose; any other state must go through the lifecycle first.
+# Delete a task file outright. Allowed only from a state with nothing to lose:
+# DRAFT (never ran) or FAILED (already discarded). A READY/RUNNING/BLOCKED/DONE
+# task is refused — unrelease/revert/fail it first.
 cmd_delete() {
   [ $# -ge 1 ] || die "usage: mux delete <id>"
-  local f; f="$(resolve_id "$1")"
-  require_status "$f" FAILED
+  local f st; f="$(resolve_id "$1")"; st="$(task_status "$f")"
+  case "$st" in
+    DRAFT|FAILED) ;;
+    *) die "${f##*/} is $st — only a DRAFT or FAILED task can be deleted" ;;
+  esac
   rm -f "$f"
   echo "🗑 ${f##*/} deleted"
 }
@@ -631,6 +638,7 @@ cmd="${1:-status}"; shift || true
 case "$cmd" in
   add)            cmd_add "$@" ;;
   release)        cmd_release "$@" ;;
+  unrelease)      cmd_unrelease "$@" ;;
   claim)          cmd_claim "$@" ;;
   start|web)      cmd_web "$@" ;;
   block)          cmd_block "$@" ;;

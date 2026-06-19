@@ -125,6 +125,24 @@ test_happy_path() {
 }
 
 # ==========================================================================
+# 2a. unrelease is the inverse of release: READY -> DRAFT, and only READY.
+# ==========================================================================
+test_unrelease() {
+  header "unrelease READY -> DRAFT (regret a release)"
+  local d; d="$(setup_repo)"
+  m "$d" add reg "do the thing"
+  local f; f="$(ls "$d"/.mux/tasks/*reg*.task.md)"
+  m "$d" release reg
+  assert_status "after release: READY" READY "$f"
+  m "$d" unrelease reg
+  assert_zero "unrelease exits 0"
+  assert_status "after unrelease: DRAFT" DRAFT "$f"
+  # Guarded to READY: unrelease on a DRAFT is refused.
+  m "$d" unrelease reg
+  assert_nonzero "unrelease on a non-READY task is refused"
+}
+
+# ==========================================================================
 # 2b. Auto mode (the .mux/auto flag) makes the executor run DRAFTs IN PLACE:
 #     `next` selects a DRAFT and `claim` flips it DRAFT->RUNNING, all WITHOUT a
 #     DRAFT->READY rewrite — so toggling auto off leaves un-run tasks DRAFT.
@@ -345,19 +363,26 @@ test_revert_fail_discard() {
 # 7b. delete removes a FAILED task file; refuses any other state.
 # ==========================================================================
 test_delete() {
-  header "delete clears a FAILED task, refuses others"
+  header "delete clears a FAILED or DRAFT task, refuses others"
   local d; d="$(setup_repo)"
   local f="$d/.mux/tasks/20200101-000000-del.task.md"
   mk_task "$d" "20200101-000000-del.task.md" FAILED
   m "$d" delete del
   assert_zero "delete exits 0 on a FAILED task"
-  assert "delete removed the task file" test ! -e "$f"
+  assert "delete removed the FAILED task file" test ! -e "$f"
+
+  # A DRAFT never ran, so it's deletable too.
+  local h="$d/.mux/tasks/20200101-000000-drf.task.md"
+  mk_task "$d" "20200101-000000-drf.task.md" DRAFT
+  m "$d" delete drf
+  assert_zero "delete exits 0 on a DRAFT task"
+  assert "delete removed the DRAFT task file" test ! -e "$h"
 
   local g="$d/.mux/tasks/20200101-000000-rdy.task.md"
   mk_task "$d" "20200101-000000-rdy.task.md" READY
   m "$d" delete rdy
-  assert_nonzero "delete refuses a non-FAILED task"
-  assert "delete left the non-FAILED file in place" test -e "$g"
+  assert_nonzero "delete refuses a READY (non-DRAFT/FAILED) task"
+  assert "delete left the READY file in place" test -e "$g"
 }
 
 # ==========================================================================
@@ -541,6 +566,7 @@ STUB
 # --- run -------------------------------------------------------------------
 test_add
 test_happy_path
+test_unrelease
 test_auto_runs_drafts
 test_illegal_transitions
 test_claim_clean_check

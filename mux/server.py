@@ -410,18 +410,21 @@ def spawn_direct(task_file):
     work on one DRAFT task. Unlike spawn_resume there is no session to attach to
     (a DRAFT has never run), so this starts a new session pointed at the task
     file. INTERACTIVE — the human drives, so no -p/stream-json/skip-permissions;
-    normal permission prompts apply. NOTE: this directed session runs OUTSIDE
-    the headless board — the task stays DRAFT and is never auto-claimed or
-    auto-tracked; the operator drives it by hand. Returns False if task_file is
-    not a valid existing task basename."""
+    normal permission prompts apply. Launches in PLAN mode (--permission-mode
+    plan) so claude reads and refines the task WITH you instead of immediately
+    executing it — the point of directing a DRAFT is to shape it, not run it.
+    NOTE: this directed session runs OUTSIDE the headless board — the task stays
+    DRAFT and is never auto-claimed or auto-tracked; the operator drives it by
+    hand. Returns False if task_file is not a valid existing task basename."""
     name = os.path.basename(task_file or "")
     if not re.fullmatch(r"[A-Za-z0-9._-]+\.task\.md", name):
         return False
     if not os.path.exists(os.path.join(REPO, ".mux", "tasks", name)):
         return False
-    prompt = (f"Read .mux/tasks/{name} and complete that task — do everything "
-              f"its Goal and Details require. {name} is your task.")
-    cmd = (f'cd {json.dumps(REPO)} && claude {json.dumps(prompt)}'
+    prompt = (f"Read .mux/tasks/{name}. This is a DRAFT mux task — help me "
+              f"refine and shape it (its Goal/Details), don't start working on "
+              f"it yet. {name} is the task we're editing.")
+    cmd = (f'cd {json.dumps(REPO)} && claude --permission-mode plan {json.dumps(prompt)}'
            .replace('"', '\\"'))
     script = (
         'tell application "Terminal"\n'
