@@ -188,6 +188,48 @@ def result_summary(ev):
     return "Σ " + " · ".join(segs) if segs else ""
 
 
+# A fixed, deterministic Game of Life seed (gliders that march across a toroidal
+# board so it stays lively and never dies). Rendered as a multi-line text frame
+# that replaces the old "cycle N" divider; successive run dividers show
+# successive generations, so reading down the log plays a GOL flipbook.
+_GOL_COLS, _GOL_ROWS = 24, 8
+_GOL_SEED = {
+    # three gliders at different offsets — they wrap and keep the board busy
+    (1, 0), (2, 1), (0, 2), (1, 2), (2, 2),
+    (9, 2), (10, 3), (8, 4), (9, 4), (10, 4),
+    (17, 0), (18, 1), (16, 2), (17, 2), (18, 2),
+    (20, 5), (21, 6), (19, 7), (20, 7), (21, 7),
+}
+
+
+def gol_frame(gen):
+    """Render generation `gen` of the fixed GOL seed as a single multi-line
+    string framed as a dim divider. Toroidal (wrap) edges. Cheap: a tiny grid
+    advanced a few dozen steps, recomputed each poll."""
+    cols, rows = _GOL_COLS, _GOL_ROWS
+    grid = [[1 if (x, y) in _GOL_SEED else 0 for x in range(cols)]
+            for y in range(rows)]
+    for _ in range(max(0, gen)):
+        nxt = [[0] * cols for _ in range(rows)]
+        for y in range(rows):
+            for x in range(cols):
+                c = 0
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        if dx or dy:
+                            c += grid[(y + dy) % rows][(x + dx) % cols]
+                alive = grid[y][x]
+                nxt[y][x] = 1 if (c == 3 or (alive and c == 2)) else 0
+        grid = nxt
+    rule = "─" * (cols + 2)
+    body = "\n".join(" " + "".join("█" if c else " " for c in row)
+                     for row in grid)
+    # Lead with the recognized "─" divider marker so the whole block picks up
+    # the muted divider styling (class `ls`); the embedded newlines render as
+    # one block because `#log` is `white-space:pre-wrap`.
+    return rule + "\n" + body + "\n" + rule
+
+
 def log_lines(limit=300):
     """Render the latest tick log (Claude stream-json) into readable lines.
 
@@ -217,7 +259,10 @@ def log_lines(limit=300):
                 # (it carries a fresh session_id). All other system subtypes
                 # (thinking_tokens, hook_started, …) must NOT draw a divider.
                 cycle += 1
-                out.append(f"─────────── cycle {cycle} ───────────")
+                # The number is never shown; we only use it to pick WHICH GOL
+                # generation to render, so successive run dividers play a
+                # flipbook (gen N, N+1, …). cycle 1 → seed (gen 0).
+                out.append(gol_frame(cycle - 1))
                 thinking = False
             elif sub == "thinking_tokens":
                 # Collapse consecutive thinking events into one muted line.

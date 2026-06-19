@@ -167,7 +167,11 @@ class LogLinesTest(unittest.TestCase):
             for ev in events:
                 f.write(json.dumps(ev) + "\n")
         lines = server.log_lines()
-        self.assertTrue(any("cycle 1" in l for l in lines))
+        # The init event draws a GOL divider frame (no "cycle N" text): a
+        # multi-line "─"-led block whose alive cells render as "█".
+        self.assertTrue(any(isinstance(l, str) and l.startswith("─")
+                            and "█" in l and "\n" in l for l in lines))
+        self.assertFalse(any(isinstance(l, str) and "cycle" in l for l in lines))
         self.assertIn("● thinking out loud", lines)
         self.assertIn("→ Bash: echo hi", lines)
         self.assertIn("✓ all done", lines)
