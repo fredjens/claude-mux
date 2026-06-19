@@ -54,16 +54,18 @@ async function pollStatus(){try{const s=await (await fetch("/api/status")).json(
   drawBranch(s.git)}
  catch(e){}
  drawWork()}
-// Branch chip: which branch this session commits to, plus how far it's ahead
-// (↑ unpushed) / behind (↓) the upstream — quiet (just the name) when in sync,
-// a muted "no upstream" hint on a fresh branch. Reflects the last fetch.
+// Branch chip: which branch this session commits to, plus how far it's behind
+// (↓) the upstream, the dirty working-tree count (±N), and a muted diffstat of
+// the about-to-ship work (N files +ins −del). The ahead/unpushed count lives on
+// the "End & push" button, not here. Quiet (just the name) when there's nothing
+// to show; a muted "no upstream" hint on a fresh branch. Reflects the last fetch.
 function drawBranch(g){const el=E("branch");if(!el)return
  if(!g||!g.branch){el.innerHTML="";return}
  let extra=""
  if(!g.upstream)extra=' <span class=branch-sub>no upstream</span>'
- else{if(g.ahead>0)extra+=' <span class=branch-ahead>↑'+g.ahead+'</span>'
-  if(g.behind>0)extra+=' <span class=branch-behind>↓'+g.behind+'</span>'}
+ else if(g.behind>0)extra+=' <span class=branch-behind>↓'+g.behind+'</span>'
  if(g.dirty>0)extra+=' <span class=branch-dirty>±'+g.dirty+'</span>'
+ if(g.files>0)extra+=' <span class=branch-sub>'+g.files+' file'+(g.files==1?'':'s')+(g.ins?' +'+g.ins:'')+(g.del?' −'+g.del:'')+'</span>'
  el.innerHTML=esc(g.branch)+extra
  lastGit=g;drawEnd()}
 // "End & push": the single session-finalize action. The count it advertises is
@@ -73,7 +75,7 @@ let lastGit=null,committedCount=0
 function shipCount(){const g=lastGit
  return (g&&g.upstream&&g.ahead!=null)?g.ahead:committedCount}
 function drawEnd(){const b=E("endbtn");if(!b)return
- const n=shipCount();b.innerHTML="End &amp; push"+(n>0?" ↑"+n:"")}
+ const n=shipCount();b.innerHTML='↥ End &amp; push'+(n>0?' '+n:'')}
 // One CONFIRM that spells out EXACTLY what happens in plain words — this pushes
 // outward and tears the session down, so it must never fire by accident.
 function endSession(){const g=lastGit||{},n=shipCount()

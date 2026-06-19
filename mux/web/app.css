@@ -13,7 +13,6 @@
  #provider{color:var(--mux-text-muted);white-space:nowrap}
  .branch{font-size:12px;color:var(--mux-text-dim);white-space:nowrap}
  .branch:empty{display:none}
- .branch .branch-ahead{color:var(--accent);font-weight:600;margin-left:1px}
  .branch .branch-behind{color:var(--mux-text-muted);font-weight:600;margin-left:1px}
  .branch .branch-sub{color:var(--mux-text-muted)}
  .branch .branch-dirty{color:var(--mux-code-accent);font-weight:600;margin-left:1px}
@@ -36,11 +35,11 @@
  .t .nm:hover{color:var(--accent);text-decoration:underline}
  button.danger{color:var(--mux-text-muted)} button.danger:hover{border-color:var(--danger);color:var(--danger)}
  #autobtn.on{border-color:var(--accent);color:var(--accent)}
- /* End & push: the session-finalize button. Distinct from the accent "channel +"
-    so the outward-facing action reads on its own — bordered + bold by default,
-    fills on hover to confirm weight. */
- button.end{border-color:var(--ok);color:var(--ok);font-weight:600}
- button.end:hover{background:var(--ok);border-color:var(--ok);color:var(--mux-bg)}
+ /* End & push: the session-finalize button. Same solid-fill formula as
+    button.ok so it speaks the system's affirmative-action language; it still
+    stands out as the lone persistent solid-green button with a ↥ push glyph. */
+ button.end{background:var(--ok);border-color:var(--ok);color:var(--mux-bg);font-weight:600}
+ button.end:hover{filter:brightness(1.12);color:var(--mux-bg)}
  button.primary{background:var(--accent);border-color:var(--accent);color:var(--mux-bg);font-weight:600}
  button.primary:hover{filter:brightness(1.12);color:var(--mux-bg)}
  button.ok{background:var(--ok);border-color:var(--ok);color:var(--mux-bg);font-weight:600}

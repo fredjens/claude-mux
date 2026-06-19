@@ -69,19 +69,79 @@ def git_dirty_nonmux():
     return False
 
 
+def resolve_base():
+    """The branch a session returns to — mirrors mux.sh resolve_base: explicit
+    MUX_BASE wins, then a .mux/base note, then origin/HEAD's short name, else
+    "main". Defensive (never raises); used to scope the about-to-ship diffstat on
+    a branch with no upstream."""
+    b = os.environ.get("MUX_BASE")
+    if b:
+        return b
+    note = os.path.join(REPO, ".mux", "base")
+    if os.path.exists(note):
+        try:
+            with open(note) as f:
+                b = f.readline().strip()
+            if b:
+                return b
+        except OSError:
+            pass
+    try:
+        d = subprocess.run(["git", "symbolic-ref", "--quiet", "--short",
+                            "refs/remotes/origin/HEAD"], cwd=REPO,
+                           capture_output=True, text=True)
+        name = d.stdout.strip()
+        if name.startswith("origin/"):
+            name = name[len("origin/"):]
+        if name:
+            return name
+    except OSError:
+        pass
+    return "main"
+
+
+def ship_diffstat(rng):
+    """files/insertions/deletions for a commit range (e.g. "@{u}..HEAD"), the
+    diffstat of the work a push would ship. Defensive — returns zeros on any
+    failure so the chip just shows nothing extra."""
+    out = {"files": 0, "ins": 0, "del": 0}
+    try:
+        r = subprocess.run(["git", "diff", "--numstat", rng], cwd=REPO,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return out
+        files = ins = dele = 0
+        for ln in r.stdout.splitlines():
+            parts = ln.split("\t")
+            if len(parts) < 3:
+                continue
+            files += 1
+            # Binary files report "-\t-"; count the file but not the lines.
+            if parts[0].isdigit():
+                ins += int(parts[0])
+            if parts[1].isdigit():
+                dele += int(parts[1])
+        return {"files": files, "ins": ins, "del": dele}
+    except (OSError, ValueError):
+        return out
+
+
 def git_branch_state():
     """The current branch and its push/pull standing vs upstream, for the header
     chip. Read-only and defensive — mirrors git_dirty_nonmux: it must never raise,
     so every git call is guarded and falls back to a safe dict.
 
     Returns {"branch": <name>, "upstream": <bool>, "ahead": <int|null>,
-    "behind": <int|null>, "dirty": <int>}. branch is "(detached)" on a detached
-    HEAD. ahead/behind are null when there is no upstream; otherwise counted as of
-    the LAST fetch (we never auto-fetch here), so "behind" may be stale — that's
-    acceptable. dirty is the count of changed files OUTSIDE .mux/ (same rule as
-    git_dirty_nonmux: the .mux/ queue is metadata, never counts as work)."""
+    "behind": <int|null>, "dirty": <int>, "files": <int>, "ins": <int>,
+    "del": <int>}. branch is "(detached)" on a detached HEAD. ahead/behind are
+    null when there is no upstream; otherwise counted as of the LAST fetch (we
+    never auto-fetch here), so "behind" may be stale — that's acceptable. dirty is
+    the count of changed files OUTSIDE .mux/ (same rule as git_dirty_nonmux: the
+    .mux/ queue is metadata, never counts as work). files/ins/del are the diffstat
+    of the about-to-ship work — the upstream range when there's an upstream, else
+    against the base branch — 0 when nothing to ship."""
     safe = {"branch": "", "upstream": False, "ahead": None, "behind": None,
-            "dirty": 0}
+            "dirty": 0, "files": 0, "ins": 0, "del": 0}
     try:
         st = subprocess.run(["git", "status", "--porcelain"], cwd=REPO,
                            capture_output=True, text=True)
@@ -96,14 +156,18 @@ def git_branch_state():
                             "--symbolic-full-name", "@{u}"], cwd=REPO,
                            capture_output=True, text=True)
         if u.returncode != 0:
-            return safe
+            # No upstream: scope the ship diffstat against the base branch.
+            stat = ship_diffstat(resolve_base() + "..HEAD")
+            return {**safe, **stat}
         c = subprocess.run(["git", "rev-list", "--left-right", "--count",
                             "@{u}...HEAD"], cwd=REPO, capture_output=True, text=True)
         if c.returncode != 0:
             return safe
         behind, ahead = c.stdout.split()
+        stat = ship_diffstat("@{u}..HEAD")
         return {"branch": safe["branch"], "upstream": True,
-                "ahead": int(ahead), "behind": int(behind), "dirty": dirty}
+                "ahead": int(ahead), "behind": int(behind), "dirty": dirty,
+                **stat}
     except (OSError, ValueError):
         return safe
 
