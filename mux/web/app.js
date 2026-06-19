@@ -202,17 +202,6 @@ function resume(id){fetch("/api/resume",{method:"POST",headers:{"content-type":"
 // (human-driven). Runs outside the headless board — the task stays DRAFT.
 function direct(file){fetch("/api/direct",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({file})})
  .then(r=>r.json()).then(d=>{if(!d.ok)alert("direct failed:\n"+(d.out||""))}).catch(e=>alert("direct failed: "+e))}
-// Follow up on a COMMITTED (landed) task: capture feedback and turn it into a
-// NEW DRAFT task pointing back at the commit it iterates on. Does NOT resume the
-// old session — the new task lands on the board for the human to release.
-async function reprompt(file){
- const text=prompt("Follow-up for this committed task — a new DRAFT will be created:")
- if(!text||!text.trim())return
- try{const r=await fetch("/api/reprompt",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({file,text})})
-  const d=await r.json()
-  if(!d.ok){alert("reprompt failed:\n"+(d.out||("HTTP "+r.status)));return}}
- catch(e){alert("reprompt failed: "+e);return}
- refresh()}
 // Auto mode (persisted server-side). When ON the toggle does the Release/Approve
 // gates' job, so those per-task buttons are hidden; revert/answer escape hatches stay.
 let auto=false
@@ -240,8 +229,11 @@ function buttons(t){const b=[],f=t.file
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  // A landed task keeps a Diff affordance so you can re-check what it committed.
  if(t.status=="COMMITTED"){b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
-  // Follow up on landed work → a new DRAFT task seeded with feedback + a commit pointer.
-  b.push(`<button onclick="reprompt('${f}')">Reprompt</button>`)}
+  // Follow up on landed work by RESUMING the session that built it — opens an
+  // interactive Terminal (claude --resume) with full context, so the human can
+  // steer a follow-up live and the next `mux ok` sweeps the edits. Shown only
+  // when a resumable session id was recorded.
+  if(t.session)b.push(`<button onclick="resume('${t.session}')">Reprompt</button>`)}
  if(t.status=="BLOCKED"){b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
   // A parked question you've decided not to answer can be cleared off the board.
   // mux refuses this if the blocked task left uncommitted edits (revert first).
