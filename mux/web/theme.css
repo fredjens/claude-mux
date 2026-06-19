@@ -1,0 +1,28 @@
+:root{
+  /* UI sans font — buttons, header brand/provider/path, section titles */
+  --mux-sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  /* surfaces — warm neutral gray (warm, not brown: low saturation, faint warm hue) */
+  --mux-bg:#141311;            /* page / header / section / drawer bg; text on accent buttons */
+  --mux-panel:#0c0b0a;         /* near-black plan/log/summary blocks + drawer code blocks */
+  --mux-chip:#211f1c;          /* inline code chips */
+  /* borders */
+  --mux-border:#302d29;        /* main borders / dividers; also GoL logo bg */
+  --mux-border-faint:#272421;  /* faint row dividers; h2 / table-cell borders */
+  --mux-border-strong:#3d3934; /* drawer edge, close button, blockquote, link underline */
+  /* text */
+  --mux-text:#d0ccc4;          /* body text, task name, links, pre-code text */
+  --mux-text-bright:#ddd9d1;   /* markdown body, em */
+  --mux-text-strong:#f2efe9;   /* drawer headings / title / strong */
+  --mux-text-muted:#918b82;    /* muted labels, meta, empty-state text */
+  --mux-text-dim:#a8a299;      /* secondary / button text; shimmer mid stop */
+  /* accents & effects */
+  --mux-bright:#f4f1eb;        /* shimmer bright stop; ::selection text */
+  --mux-dim:#6a655d;           /* shimmer dark stop; link-hover underline; drawer ul bullet */
+  --mux-divider:#615c54;       /* the ─ cycle divider line (.ls) */
+  --mux-select-bg:#3a342b;     /* ::selection background */
+  --mux-code-accent:#d7bd97;   /* drawer inline-code text (warm gold pop, light enough to not read brown) */
+  --mux-backdrop:rgba(12,10,8,.55); /* drawer dim overlay (#backdrop) */
+  /* GoL logo */
+  --mux-gol-border:#3a362f;
+  --mux-gol-fill:#bdb6aa;
+}

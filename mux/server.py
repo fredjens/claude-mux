@@ -379,48 +379,49 @@ def _md_page(title, meta_chips_html, body_md):
     bjs = json.dumps(body_md).replace("</", "<\\/")
     return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
 <script src="/web/vendor/marked.min.js"></script>
-<style>body{{margin:0;background:#1a1815;color:#dcd6ca}}
- ::selection{{background:#3a2d24;color:#f0ebe0}}
+<link rel=stylesheet href="/web/theme.css">
+<style>body{{margin:0;background:var(--mux-bg);color:var(--mux-text)}}
+ ::selection{{background:var(--mux-select-bg);color:var(--mux-bright)}}
  .md{{box-sizing:border-box;max-width:68ch;margin:0 auto;padding:48px 40px 96px;min-height:100vh;
   font:17px/1.78 Georgia,"Iowan Old Style","Palatino",serif;
   hanging-punctuation:first allow-end;text-rendering:optimizeLegibility}}
- .title{{font:600 23px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:#f3eee4;
+ .title{{font:600 23px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:var(--mux-text-strong);
   letter-spacing:-.01em;text-wrap:balance}}
- .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:#807767;margin:7px 0 30px;
-  padding-bottom:18px;border-bottom:1px solid #2a2620;letter-spacing:.01em}}
- .meta b{{color:#a89e8e;font-weight:600}}
+ .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:var(--mux-text-muted);margin:7px 0 30px;
+  padding-bottom:18px;border-bottom:1px solid var(--mux-border);letter-spacing:.01em}}
+ .meta b{{color:var(--mux-text-dim);font-weight:600}}
  .md>:first-child{{margin-top:0}}
  .md h1,.md h2,.md h3,.md h4{{font-family:Georgia,"Iowan Old Style","Palatino",serif;
-  color:#f3eee4;line-height:1.25;margin:1.9em 0 .55em;text-wrap:balance}}
+  color:var(--mux-text-strong);line-height:1.25;margin:1.9em 0 .55em;text-wrap:balance}}
  .md h1{{font-size:26px;letter-spacing:-.015em;margin-top:1.4em}}
- .md h2{{font-size:20px;letter-spacing:-.01em;padding-bottom:.28em;border-bottom:1px solid #262219}}
+ .md h2{{font-size:20px;letter-spacing:-.01em;padding-bottom:.28em;border-bottom:1px solid var(--mux-border-faint)}}
  .md h3{{font-size:17px;font-weight:600;letter-spacing:-.005em}}
- .md h4{{font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#a89e8e}}
+ .md h4{{font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mux-text-dim)}}
  .md p{{margin:0 0 1.05em}} .md li{{margin:.3em 0}}
  .md ul,.md ol{{margin:0 0 1.05em;padding-left:1.4em}}
  .md li>ul,.md li>ol{{margin:.3em 0}}
  .md ul{{list-style:none}}
  .md ul>li{{position:relative}}
  .md ul>li::before{{content:"";position:absolute;left:-1em;top:.72em;width:4px;height:4px;
-  border-radius:50%;background:#6e6555}}
+  border-radius:50%;background:var(--mux-dim)}}
  .md ol{{padding-left:1.6em}}
- .md li::marker{{color:#807767}}
- .md a{{color:#cfc9bc;text-decoration:none;border-bottom:1px solid #3a342c}}
- .md a:hover{{border-bottom-color:#5c5345}}
- .md strong{{color:#f3eee4;font-weight:600}}
- .md em{{color:#e6e0d4}}
- .md code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:#211d18;
-  border-radius:4px;padding:.12em .42em;color:#dcb992}}
- .md pre{{background:#100e0b;border:1px solid #262219;border-radius:8px;padding:15px 18px;
+ .md li::marker{{color:var(--mux-text-muted)}}
+ .md a{{color:var(--mux-text);text-decoration:none;border-bottom:1px solid var(--mux-border-strong)}}
+ .md a:hover{{border-bottom-color:var(--mux-dim)}}
+ .md strong{{color:var(--mux-text-strong);font-weight:600}}
+ .md em{{color:var(--mux-text-bright)}}
+ .md code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--mux-chip);
+  border-radius:4px;padding:.12em .42em;color:var(--mux-code-accent)}}
+ .md pre{{background:var(--mux-panel);border:1px solid var(--mux-border-faint);border-radius:8px;padding:15px 18px;
   margin:0 0 1.05em;overflow:auto}}
- .md pre code{{background:none;border:0;padding:0;color:#cfc9bc;font-size:13px;line-height:1.65}}
- .md blockquote{{margin:0 0 1.05em;padding:.1em 0 .1em 1.2em;border-left:2px solid #3a342c;
-  color:#a89e8e;font-style:italic}}
+ .md pre code{{background:none;border:0;padding:0;color:var(--mux-text);font-size:13px;line-height:1.65}}
+ .md blockquote{{margin:0 0 1.05em;padding:.1em 0 .1em 1.2em;border-left:2px solid var(--mux-border-strong);
+  color:var(--mux-text-dim);font-style:italic}}
  .md blockquote p{{margin:0 0 .5em}} .md blockquote :last-child{{margin-bottom:0}}
- .md hr{{border:0;border-top:1px solid #2a2620;margin:2.4em 0}}
+ .md hr{{border:0;border-top:1px solid var(--mux-border);margin:2.4em 0}}
  .md table{{border-collapse:collapse;width:100%;margin:0 0 1.05em;font-size:15px}}
- .md th,.md td{{padding:7px 14px 7px 0;text-align:left;border-bottom:1px solid #262219}}
- .md th{{color:#a89e8e;font-weight:600;border-bottom:1px solid #3a342c}}
+ .md th,.md td{{padding:7px 14px 7px 0;text-align:left;border-bottom:1px solid var(--mux-border-faint)}}
+ .md th{{color:var(--mux-text-dim);font-weight:600;border-bottom:1px solid var(--mux-border-strong)}}
  @media(max-width:760px){{.md{{padding:28px 22px 64px;font-size:16px}}}}</style>
 <article class="md" id=md></article>
 <script>document.getElementById("md").innerHTML={hjs}+marked.parse({bjs})</script>"""

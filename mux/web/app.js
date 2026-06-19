@@ -42,7 +42,7 @@ function golStep(){const {cols,rows,grid}=GOL,n=cols*rows,nx=new Uint8Array(n)
  if(same){GOL.still++;if(GOL.still>1)golSeed()}else GOL.still=0}
 function golDraw(){const cv=E("gol");if(!cv)return;const ctx=cv.getContext("2d")
  const {cols,rows,grid}=GOL;ctx.clearRect(0,0,cols,rows)
- ctx.fillStyle="#bbbbbb"
+ ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--mux-gol-fill").trim()||"#aeb4bf"
  for(let i=0;i<cols*rows;i++)if(grid[i])ctx.fillRect(i%cols,(i/cols)|0,1,1)}
 function golStart(){if(GOL.timer)return
  if(!GOL.grid)golSeed()
@@ -113,7 +113,7 @@ async function refresh(){
   `${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
   `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span>${t.file.replace(/\.task\.md$/,"")}</span></div>`+
-  `${buttons(t)}</div>`).join("")||"<div style='color:#8a8480;font-size:12.5px'>No tasks</div>"
+  `${buttons(t)}</div>`).join("")||"<div class='empty'>No tasks</div>"
  // Animate the logo only while a task is actively executing; otherwise freeze
  // it on its last frame so it sits there as a static brand mark.
  ts.some(t=>t.executing)?golStart():golStop()
@@ -122,7 +122,7 @@ async function refresh(){
   // Object entries are long/multi-line markdown messages: render them inline as
   // formatted markdown (marked.js) instead of dumping raw ## / ** into the log.
   if(l&&typeof l=="object")return `<div class="l md">${window.marked?marked.parse(l.md||""):esc(l.md||"")}</div>`
-  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","▶":"lk"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div style='color:#8a8480;font-size:12.5px'>Idle — waiting for a READY task</div>")
+  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","▶":"lk"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div class='empty'>Idle — waiting for a READY task</div>")
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
 fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
