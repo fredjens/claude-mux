@@ -359,7 +359,11 @@ def log_lines(limit=300):
     if out:
         reason = idle_reason()
         if reason and reason != "No activity":
-            out.append("✗ " + reason)
+            # Awaiting human approval is a benign "waiting on you" state, not an
+            # error — render it with the muted ⌖ glyph (→ --sub) rather than the
+            # red ✗. Genuinely blocking idle states keep the ✗ error mark.
+            glyph = "⌖" if reason.startswith("Idle — a finished task is awaiting") else "✗"
+            out.append(glyph + " " + reason)
         return out
     return [idle_reason() or "Starting…"]
 
@@ -609,7 +613,15 @@ def diff_page(name):
         else:
             diff, message = "", ""
         return _diff_page(title, chips, diff, "(commit not found)", message=message or None)
-    # Default / RUNNING: the pending working-tree change, queue always excluded.
+    # Only a RUNNING task owns the working tree (it's the finished change under
+    # review). For DRAFT/READY/BLOCKED/FAILED there's nothing attributable to the
+    # task yet — show an empty state rather than the whole working tree, which
+    # would be the same global diff for every not-yet-run task.
+    if status != "RUNNING":
+        chips = f"<b>status</b> {escape(status)}"
+        return _diff_page(title, chips, "",
+                          f"(no diff — only RUNNING or COMMITTED tasks have one; this is {status})")
+    # RUNNING: the pending working-tree change, queue always excluded.
     chips = (f"<b>status</b> {escape(status)}  ·  working tree vs HEAD "
              f"<b>(.mux excluded)</b>")
     diff = _git("diff", "HEAD", "--", ".", ":(exclude).mux")
