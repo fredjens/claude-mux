@@ -24,11 +24,18 @@ Then write `.mux/tasks/<timestamp>-<short-slug>.task.md` in this exact shape:
 
     # Task: <short-slug>
     # STATUS: DRAFT
+    # Channel: __SESSION__
     ## Goal
     <one clear outcome; what "done" looks like>
     ## Details
     - point to specific files / functions
     - state constraints and anything the output must NOT touch
+
+`# Channel:` is YOUR OWN session id — the planner conversation writing this
+task. Record it so a human can later resume this exact planning conversation
+from the dashboard (`direct ⇥`). Copy the value verbatim: it is the
+`__SESSION__` substituted into this prompt — write that literal id on every
+task file you produce, on the line right after `# STATUS: DRAFT`.
 
 Rules for the task body:
 - Keep it SELF-CONTAINED. The output works from the file alone — be explicit:

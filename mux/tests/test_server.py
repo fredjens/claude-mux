@@ -385,5 +385,68 @@ class SendDisconnectTest(unittest.TestCase):
         h._send(200, "ok")  # must not raise
 
 
+class SpawnDirectTest(unittest.TestCase):
+    """spawn_direct resumes the planner session when the DRAFT carries a valid
+    `# Channel: <uuid>` header, else launches a fresh channel-scoped planner.
+    We intercept subprocess.Popen so no Terminal is spawned, and assert on the
+    osascript command string it would have run."""
+
+    SID = "0123abcd-4567-89ab-cdef-0123456789ab"
+
+    def setUp(self):
+        self._orig_repo = server.REPO
+        self._orig_popen = server.subprocess.Popen
+        self.tmp = tempfile.mkdtemp()
+        server.REPO = self.tmp
+        os.makedirs(os.path.join(self.tmp, ".mux", "tasks"))
+        self.captured = []
+        server.subprocess.Popen = lambda argv, *a, **k: self.captured.append(argv)
+
+    def tearDown(self):
+        server.REPO = self._orig_repo
+        server.subprocess.Popen = self._orig_popen
+
+    def _write(self, name, body):
+        with open(os.path.join(self.tmp, ".mux", "tasks", name), "w") as f:
+            f.write(body)
+
+    def _script(self):
+        # The osascript -e argument carries the embedded `claude ...` command.
+        self.assertEqual(len(self.captured), 1)
+        argv = self.captured[0]
+        self.assertEqual(argv[0], "osascript")
+        return argv[-1]
+
+    def test_resume_branch_when_channel_id_present(self):
+        self._write("t.task.md",
+                    f"# Task: t\n# STATUS: DRAFT\n# Channel: {self.SID}\n## Goal\nx\n")
+        self.assertTrue(server.spawn_direct("t.task.md"))
+        s = self._script()
+        self.assertIn(f"claude --resume {self.SID} ", s)
+        # planner scope re-passed alongside the resume
+        self.assertIn("--setting-sources user", s)
+        self.assertIn("Write(.mux/**)", s)
+        self.assertIn("--append-system-prompt", s)
+
+    def test_fresh_branch_when_channel_id_absent(self):
+        self._write("t.task.md", "# Task: t\n# STATUS: DRAFT\n## Goal\nx\n")
+        self.assertTrue(server.spawn_direct("t.task.md"))
+        s = self._script()
+        self.assertNotIn("--resume", s)
+        self.assertIn("--setting-sources user", s)
+        self.assertIn("Write(.mux/**)", s)
+
+    def test_invalid_channel_id_falls_back_to_fresh(self):
+        self._write("t.task.md",
+                    "# Task: t\n# STATUS: DRAFT\n# Channel: not-a-uuid\n## Goal\nx\n")
+        self.assertTrue(server.spawn_direct("t.task.md"))
+        self.assertNotIn("--resume", self._script())
+
+    def test_bad_basename_returns_false_without_spawning(self):
+        self.assertFalse(server.spawn_direct("notes.md"))
+        self.assertFalse(server.spawn_direct("../escape.task.md"))  # missing file
+        self.assertEqual(self.captured, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -478,24 +478,32 @@ def spawn_resume(sid):
 
 
 def spawn_direct(task_file):
-    """Open a Terminal.app window running a FRESH interactive claude seeded to
-    work on one DRAFT task — launched as a CHANNEL-SCOPED planner, matching
-    `mux channel` (NOT a generic plan-mode session). Unlike spawn_resume there
-    is no session to attach to (a DRAFT has never run), so this starts a new
-    session pointed at the task file. INTERACTIVE — the human drives, so no
+    """Open a Terminal.app window running an interactive CHANNEL-SCOPED planner
+    seeded to work on one DRAFT task — matching `mux channel` (NOT a generic
+    plan-mode session). INTERACTIVE — the human drives, so no
     -p/stream-json/skip-permissions; normal permission prompts apply. It runs
     with the same scoped permissions as a channel: `--setting-sources user`
     (ignore the target repo's project settings) and an allowedTools list that
     permits writing/editing ONLY under .mux/** — so the directed session can
     read the repo and shape the task but CANNOT silently edit source. The
     CHANNEL system prompt tells it to refine, not execute, the task.
+
+    RESUME vs FRESH: if the task file carries a `# Channel: <uuid>` header (the
+    planner session that authored it — see `task_channel`/CHANNEL.md), this
+    --resume's THAT exact planning conversation, RE-PASSING the same planner
+    permission flags so the resumed session has identical scope to a new
+    planner. If no valid channel id is present, it falls back to a fresh
+    channel-scoped planner (no --resume). Only `--resume <sid>` differs between
+    the two branches; the flag list is shared.
+
     NOTE: this directed session runs OUTSIDE the headless board — the task stays
     DRAFT and is never auto-claimed or auto-tracked; the operator drives it by
     hand. Returns False if task_file is not a valid existing task basename."""
     name = os.path.basename(task_file or "")
     if not re.fullmatch(r"[A-Za-z0-9._-]+\.task\.md", name):
         return False
-    if not os.path.exists(os.path.join(REPO, ".mux", "tasks", name)):
+    path = os.path.join(REPO, ".mux", "tasks", name)
+    if not os.path.exists(path):
         return False
     prompt = (f"Read .mux/tasks/{name}. This is a DRAFT mux task — help me "
               f"refine and shape it (its Goal/Details), don't start working on "
@@ -505,6 +513,17 @@ def spawn_direct(task_file):
     # directed name, mirroring cmd_channel's `sed s/__NAME__/.../`.
     with open(os.path.join(PROMPTS, "CHANNEL.md"), encoding="utf-8") as fh:
         sysprompt = fh.read().replace("__NAME__", "direct")
+    # If this DRAFT records the planner session that authored it, resume THAT
+    # conversation; same validation regex spawn_resume uses. Otherwise launch a
+    # fresh planner.
+    sid = ""
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            m = re.match(r"#\s*Channel:\s*(\S+)", line, re.IGNORECASE)
+            if m:
+                sid = m.group(1)
+                break
+    resume = f'--resume {sid} ' if re.fullmatch(r"[0-9a-f-]{36}", sid) else ''
     # Per-session scoped permissions, identical to `mux channel`: ignore project
     # settings (--setting-sources user) and pre-approve writes ONLY under .mux,
     # so a stray source edit can't happen silently. Pattern is .mux/** with NO
@@ -514,6 +533,7 @@ def spawn_direct(task_file):
     # can't parse ("Expected \" but found unknown token") once embedded in the
     # `do script` string.
     cmd = (f'cd {json.dumps(REPO)} && claude '
+           f'{resume}'
            f'--setting-sources user '
            f'--permission-mode default '
            f"--allowedTools 'Read' 'Glob' 'Grep' 'Bash' 'Write(.mux/**)' 'Edit(.mux/**)' "

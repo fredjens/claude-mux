@@ -114,6 +114,9 @@ json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # Is the RUNNING task approved? / dependency of a task and its done-state.
 task_dep()   { grep -m1 -i '^# Depends-on:' "$1" | sed 's/.*Depends-on:[[:space:]]*//' | awk '{print $1}' || true; }
 task_session() { grep -m1 -i '^# Session:' "$1" | sed 's/.*Session:[[:space:]]*//' | awk '{print $1}' || true; }
+# The planner (channel) session id that authored this task; lets `direct ⇥`
+# resume that exact planning conversation (separate from the output's # Session:).
+task_channel() { grep -m1 -i '^# Channel:' "$1" | sed 's/.*Channel:[[:space:]]*//' | awk '{print $1}' || true; }
 
 # Is a dependency satisfied? $1 = the dependency's task filename. Approved tasks
 # are DELETED (their file is gone), so the real check is the done.log ledger; the
@@ -495,6 +498,11 @@ cmd_channel() {
   echo "  YOU flip them to READY (mux release <id>); output runs READY oldest-first"
   echo "  see the queue any time:  mux status"
   echo
+  # Mint a fixed session id for this planner so a later `direct ⇥` can
+  # --resume THIS exact conversation. Lower-cased to match the [0-9a-f-]{36}
+  # validation used elsewhere. We inject it into the CHANNEL prompt (the
+  # __SESSION__ placeholder) so the channel stamps it onto every task it writes.
+  local sid; sid="$(uuidgen | tr 'A-Z' 'a-z')"
   # Per-session scoped permissions: ignore project settings so a broad project
   # allow-rule can't widen write scope; pre-approve writes under .mux only, so
   # any OTHER write prompts (a stray code edit can't happen silently).
@@ -502,10 +510,11 @@ cmd_channel() {
   # to project-root-relative, and a "./" prefix makes the rule fail to match.
   exec claude \
     -n "channel:${name}" \
+    --session-id "$sid" \
     --setting-sources user \
     --permission-mode default \
     --allowedTools 'Read' 'Glob' 'Grep' 'Bash' 'Write(.mux/**)' 'Edit(.mux/**)' \
-    --append-system-prompt "$(sed "s/__NAME__/${name}/g" "$PROMPTS_DIR/CHANNEL.md")"
+    --append-system-prompt "$(sed -e "s/__NAME__/${name}/g" -e "s/__SESSION__/${sid}/g" "$PROMPTS_DIR/CHANNEL.md")"
 }
 
 # What Claude is told to do each headless cycle (one task unit, then exit).

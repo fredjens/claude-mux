@@ -61,6 +61,8 @@ output/channel reads (exact spellings, parsed in `mux.sh`):
   is DONE (see `task_dep` / `dep_is_done`).
 - `# Session:` — the output session id, recorded while RUNNING (`task_session`
   / `record_session`).
+- `# Channel:` — the planner (channel) session id that authored this task,
+  recorded so `direct ⇥` can resume that exact planning session (`task_channel`).
 
 `mux add`'s template is `# Task:` / `# STATUS:` / `## Goal` / `## Details`.
 

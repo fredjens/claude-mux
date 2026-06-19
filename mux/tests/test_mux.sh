@@ -107,6 +107,21 @@ test_add() {
   assert_file_contains "contains the goal text" 'ship the widget' "$f"
 }
 
+# task_channel parses the `# Channel:` planner-session header that channels
+# stamp onto every task (used by the web `direct ⇥` resume). Eval just the
+# one-line parser out of mux.sh so we exercise the real definition without
+# running the dispatch at the bottom of the script.
+test_task_channel() {
+  header "task_channel parses the # Channel: header"
+  eval "$(grep -m1 '^task_channel()' "$MUX")"
+  local d; d="$(setup_repo)"
+  local sid="0123abcd-4567-89ab-cdef-0123456789ab"
+  mk_task "$d" "ch.task.md" DRAFT "# Channel: $sid"
+  assert_eq "reads the channel session id" "$(task_channel "$d/.mux/tasks/ch.task.md")" "$sid"
+  mk_task "$d" "noch.task.md" DRAFT
+  assert_eq "empty when no # Channel: header" "$(task_channel "$d/.mux/tasks/noch.task.md")" ""
+}
+
 # ==========================================================================
 # 2. Happy path: add -> release (DRAFT->READY) -> claim (READY->RUNNING).
 # ==========================================================================
@@ -565,6 +580,7 @@ STUB
 
 # --- run -------------------------------------------------------------------
 test_add
+test_task_channel
 test_happy_path
 test_unrelease
 test_auto_runs_drafts
