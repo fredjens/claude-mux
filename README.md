@@ -122,6 +122,58 @@ Channels enforce gate 1 by construction: they launch scoped to
 `Write(./.mux/**)` only, so they can read everything but write nowhere but the
 queue — enforced by Claude Code, not by trust.
 
+## Sessions & branches
+
+A **session** is one branch. You choose it when you `mux start`, everything you
+commit lands on it, and you finish the session by pushing it.
+
+**Pick the branch at start.** On a genuinely fresh start — clean tree,
+everything pushed, nothing `RUNNING` — `mux start` prompts for the branch this
+session will use:
+
+- **Enter** — continue on the current branch.
+- **`n <name>`** — create a NEW branch (off the current one) and switch to it.
+- **`e`** — choose an EXISTING local branch from a numbered list.
+
+Prefer one shot? `mux start <branch>` skips the prompt and creates-or-checks-out
+that branch (`mux start <branch> <port>` to also set the web port). Everything
+you commit this session lands wherever you land here; mux records it so the
+session knows where to return at the end.
+
+**mux operates only on the live branch.** It checks out the branch you choose at
+start and pushes it at the end. During a session it never switches, merges, or
+rebases branches — your commits simply stack on the one branch.
+
+**A fresh prompt, or a quiet continue.** The branch prompt appears only on that
+fresh slate. If a previous session is still in flight — an uncommitted change, a
+commit not yet pushed (including `COMMITTED` tasks awaiting push), or a task
+still `RUNNING` — `mux start` skips the prompt and quietly continues that branch,
+so you never get asked mid-session. Leftover `DRAFT` proposals from channels are
+branch-neutral and never count as in-flight; they carry over fine.
+
+**The lifecycle, end to end:**
+
+1. **`mux start`** — pick or create the branch (see above).
+2. **Channels propose, output works.** Channels draft tasks; you release them;
+   the output runs the one in flight (`RUNNING`).
+3. **Review the diff** in the web UI.
+4. **`mux ok`** (the `approve` button) commits the working tree to the branch.
+   The task moves to `COMMITTED` — committed, but not yet pushed. Several can
+   stack up this way across the session.
+5. **Ship** (the header button, or `mux end`) pushes the branch to its upstream,
+   clears the `COMMITTED` tasks off the board, returns you to the base branch,
+   and tears down the loop + UI — ready for the next `mux start`. It refuses
+   while a task is `RUNNING` or the tree is dirty: resolve that first.
+
+**Stepping away without pushing.** To pause, just stop the CLI — Ctrl-C,
+closing the terminal, or `mux stop`. That tears down the loop and web UI but
+leaves the branch, its commits, and the whole queue intact. Resume later with
+`mux start` and continue right where you left off. There is no separate "pause"
+button; stopping *is* the pause, and **Ship** is the only finalize.
+
+**Not part of mux today.** Anything beyond pick/create-at-start and push-at-end
+is out of scope: no mid-session branch switching, no merges, no PR creation.
+
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) CLI
