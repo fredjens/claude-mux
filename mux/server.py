@@ -795,6 +795,51 @@ def output_page(name):
     return _md_page(title, chips, body)
 
 
+def write_followup(file, text):
+    """Turn a human follow-up on a COMMITTED task into a NEW DRAFT task file.
+
+    Reads the original (basename-only, no traversal) to recover its slug and the
+    short SHA `mux ok` recorded on its `# Commit:` line, then writes a fresh
+    `.mux/tasks/<TS>-<slug>-followup.task.md` carrying the human's text under
+    ## Goal plus a machine-readable pointer back to the original task and commit.
+    It is NOT a session resume — the new task lands on the board as DRAFT for the
+    human to release like any other. Returns (ok, new_filename_or_reason)."""
+    name = os.path.basename(file or "")
+    if not name.endswith(".task.md"):
+        return False, "invalid task file"
+    text_in = (text or "").strip()
+    if not text_in:
+        return False, "empty follow-up text"
+    orig = read_task(name)
+    if orig in ("(invalid task)", "(task not found)"):
+        return False, orig.strip("()")
+    slug = _task_field(orig, "Task") or name.replace(".task.md", "")
+    sha = _task_field(orig, "Commit")
+
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    new_name = f"{ts}-{slug}-followup.task.md"
+    lines = [
+        f"# Task: {slug}-followup",
+        "# STATUS: DRAFT",
+        f"# Follow-up-of: {name}",
+    ]
+    if sha:
+        lines.append(f"# Follow-up-commit: {sha}")
+    lines += ["## Goal", text_in, "## Details"]
+    if sha:
+        lines.append(f"- This iterates on the work landed in commit {sha} (task {name}).")
+        lines.append(f"- Read `git show {sha}` to see exactly what was done before changing it.")
+    else:
+        lines.append(f"- This iterates on the work landed by task {name}.")
+        lines.append(f"- Read that task file to see exactly what was done before changing it.")
+    try:
+        with open(os.path.join(REPO, ".mux", "tasks", new_name), "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as e:
+        return False, str(e)
+    return True, new_name
+
+
 def spawn_channel(name=None):
     """Open a real Terminal.app window running a channel in this repo, focused."""
     name = re.sub(r"[^A-Za-z0-9_-]", "", name or "") or ("p" + time.strftime("%H%M%S"))
@@ -1016,6 +1061,10 @@ class H(BaseHTTPRequestHandler):
             ok = spawn_direct(d.get("file"))
             self._send(200 if ok else 400,
                        json.dumps({"ok": ok, "out": "" if ok else "invalid task file"}))
+        elif self.path == "/api/reprompt":
+            ok, res = write_followup(d.get("file"), d.get("text"))
+            self._send(200 if ok else 400,
+                       json.dumps({"ok": ok, "file": res} if ok else {"ok": ok, "out": res}))
         else:
             self._send(404, "{}")
 
