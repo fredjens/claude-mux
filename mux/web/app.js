@@ -245,6 +245,6 @@ async function refresh(){
   lastCycleCount=cycleCount}
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
-fetch("/api/repo").then(r=>r.json()).then(d=>E("repo").textContent=d.repo)
+fetch("/api/repo").then(r=>r.json()).then(d=>{const p=d.repo,el=E("repo");el.textContent=p.replace(/\/+$/,"").split("/").pop()||p;el.title=p})
 fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
 refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
