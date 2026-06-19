@@ -446,6 +446,130 @@ def plan_page(name):
     return _md_page(title, chips, "\n".join(rest))
 
 
+def _git(*args):
+    """Run a read-only git command in REPO; return stdout text ("" on failure).
+    Used only by the diff view — never mutates the tree."""
+    try:
+        r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+        return r.stdout
+    except OSError:
+        return ""
+
+
+def _task_field(text, key):
+    """First `# <key>: value` header line in a task's text, case-insensitive."""
+    for line in text.splitlines():
+        m = re.match(rf"#\s*{re.escape(key)}:\s*(.*)$", line, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _diff_html(diff_text):
+    """Color a unified diff as escaped HTML lines: added green, removed red, hunk
+    + file + meta headers muted, context plain. Each line is its own <span> so the
+    enclosing <pre> lays them out; empty lines keep height via &nbsp;."""
+    rows = []
+    for line in diff_text.split("\n"):
+        if line.startswith("--- ") or line.startswith("+++ "):
+            cls = "dh"          # file marker
+        elif line.startswith("@@"):
+            cls = "dk"          # hunk header
+        elif (line.startswith("diff ") or line.startswith("index ") or
+              line.startswith("new file") or line.startswith("deleted file") or
+              line.startswith("rename ") or line.startswith("similarity ") or
+              line.startswith("old mode") or line.startswith("new mode") or
+              line.startswith("Binary files")):
+            cls = "dm"          # meta
+        elif line.startswith("+"):
+            cls = "da"          # added
+        elif line.startswith("-"):
+            cls = "dr"          # removed
+        else:
+            cls = "dc"          # context
+        rows.append(f'<span class="{cls}">{escape(line) or "&nbsp;"}</span>')
+    return "\n".join(rows)
+
+
+def _untracked_block(path):
+    """A synthetic diff block for an untracked file: a muted `new file` header
+    followed by its contents as added (+) lines, so it colors like the rest of the
+    diff. Caps size, and never crashes on a binary/unreadable file."""
+    header = f"diff --git untracked {path}\nnew file (untracked): {path}"
+    try:
+        with open(os.path.join(REPO, path), "r", errors="replace") as fh:
+            content = fh.read(64 * 1024)
+    except OSError:
+        return header
+    if "\x00" in content:
+        return header + "\n+(binary file omitted)"
+    lines = content.split("\n")
+    CAP = 400
+    body = "\n".join("+" + ln for ln in lines[:CAP])
+    if len(lines) > CAP:
+        body += f"\n+… ({len(lines) - CAP} more lines truncated)"
+    return header + "\n" + body
+
+
+def _diff_page(title, meta_chips_html, diff_text, empty_msg="(no changes)"):
+    """A styled, read-only diff document reusing the _md_page dark theme look, but
+    with a monospace <pre> of per-line-colored diff text. `title` is plain text,
+    `meta_chips_html` is trusted inline HTML, `diff_text` is the raw unified diff."""
+    body = _diff_html(diff_text) if diff_text.strip() else \
+        f'<span class=dc>{escape(empty_msg)}</span>'
+    return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
+<link rel=stylesheet href="/web/theme.css">
+<style>body{{margin:0;background:var(--mux-bg);color:var(--mux-text)}}
+ ::selection{{background:var(--mux-select-bg);color:var(--mux-bright)}}
+ .wrap{{box-sizing:border-box;max-width:120ch;margin:0 auto;padding:40px 36px 96px;min-height:100vh}}
+ .title{{font:600 22px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:var(--mux-text-strong);
+  letter-spacing:-.01em}}
+ .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:var(--mux-text-muted);margin:7px 0 24px;
+  padding-bottom:16px;border-bottom:1px solid var(--mux-border)}}
+ .meta b{{color:var(--mux-text-dim);font-weight:600}}
+ pre.diff{{font:12.5px/1.6 ui-monospace,Menlo,monospace;background:var(--mux-panel);
+  border:1px solid var(--mux-border-faint);border-radius:8px;padding:14px 16px;margin:0;
+  overflow:auto;white-space:pre;tab-size:4}}
+ pre.diff span{{display:block}}
+ .da{{color:#aed99a}} .dr{{color:#e8a0ac}}
+ .dk{{color:var(--mux-code-accent)}} .dh{{color:var(--mux-text-dim);font-weight:600}}
+ .dm{{color:var(--mux-text-muted)}} .dc{{color:var(--mux-text)}}</style>
+<div class=wrap><div class=title>{escape(title)}</div>
+<div class=meta>{meta_chips_html}</div>
+<pre class=diff>{body}</pre></div>"""
+
+
+def diff_page(name):
+    """Render the code diff for a task, reusing the _md_page dark theme. A RUNNING
+    task (finished, awaiting approval) shows the working-tree diff vs HEAD with the
+    .mux/ queue excluded, plus any untracked files' contents — the review view. A
+    COMMITTED task (landed via `mux ok`, carrying a `# Commit:` SHA) shows that
+    commit's diff. Read-only; never mutates the tree, and never errors on a task
+    with no changes."""
+    text = read_task(name)
+    if text in ("(invalid task)", "(task not found)"):
+        return _diff_page("diff", "", "", text)
+    slug = os.path.basename(name).replace(".task.md", "")
+    status = _task_field(text, "STATUS") or "?"
+    title = _task_field(text, "Task") or slug
+    if status == "COMMITTED":
+        sha = _task_field(text, "Commit")
+        chips = (f"<b>status</b> COMMITTED  ·  <b>commit</b> {escape(sha)}")
+        diff = _git("show", sha) if re.fullmatch(r"[0-9a-f]{7,40}", sha or "") else ""
+        return _diff_page(title, chips, diff, "(commit not found)")
+    # Default / RUNNING: the pending working-tree change, queue always excluded.
+    chips = (f"<b>status</b> {escape(status)}  ·  working tree vs HEAD "
+             f"<b>(.mux excluded)</b>")
+    diff = _git("diff", "HEAD", "--", ".", ":(exclude).mux")
+    untracked = [p for p in _git("ls-files", "--others", "--exclude-standard",
+                                 "--", ".", ":(exclude).mux").splitlines() if p]
+    blocks = []
+    if diff.strip():
+        blocks.append(diff.rstrip("\n"))
+    blocks.extend(_untracked_block(p) for p in untracked)
+    return _diff_page(title, chips, "\n".join(blocks), "(no changes)")
+
+
 def spawn_channel(name=None):
     """Open a real Terminal.app window running a channel in this repo, focused."""
     name = re.sub(r"[^A-Za-z0-9_-]", "", name or "") or ("p" + time.strftime("%H%M%S"))
@@ -617,6 +741,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/plan?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, plan_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
+        elif self.path.startswith("/diff?"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, diff_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
             # against WEB and confined to it — normpath collapses any ../ so a

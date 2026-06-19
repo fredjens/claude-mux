@@ -1,6 +1,9 @@
 const E=(s)=>document.getElementById(s)
 const esc=s=>(""+s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))
 function openPlan(file){E("planframe").src='/plan?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
+// Open the code diff for a task in the same drawer iframe: the pending working-tree
+// change for a RUNNING task (review-before-approve), or the landed commit for a COMMITTED one.
+function openDiff(file){E("planframe").src='/diff?file='+encodeURIComponent(file);document.body.classList.add("drawer-open")}
 function closePlan(){document.body.classList.remove("drawer-open");E("planframe").src="about:blank"}
 document.addEventListener("keydown",e=>{if(e.key=="Escape")closePlan()})
 // Working indicator: server says executing/elapsed (polled in refresh); the
@@ -132,7 +135,11 @@ function buttons(t){const b=[],f=t.file
  if(t.status=="RUNNING"){
   if(t.executing)return ""
   if(!auto)b.push(`<button class=ok onclick="act('ok')">Approve</button>`)
+  // Review the pending working-tree change before approving — opens the diff in the drawer.
+  b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
+ // A landed task keeps a Diff affordance so you can re-check what it committed.
+ if(t.status=="COMMITTED")b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
  if(t.status=="BLOCKED")b.push(`<button onclick="act('resolve','${f}','your answer')">answer</button>`)
  // FAILED is terminal & already discarded — the only way forward is to clear it
  // off the board. (If it kept a session, the resume button below also appears.)
