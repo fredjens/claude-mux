@@ -29,6 +29,8 @@
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
 #   mux ok       [note...]      approve RUNNING: commit -> COMMITTED (awaiting push)
+#   mux end                     END the session: push the branch, clear COMMITTED
+#                               tasks, return to base, stop the loop + web UI
 #   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
 #   mux fail     <id> <why...>  RUNNING-> FAILED  (output: discard + reason)
@@ -223,6 +225,20 @@ record_session() {
   append_block "$found" "# Session: $id"
 }
 
+# The branch to return to when a session ends. Explicit MUX_BASE wins, then a
+# .mux/base note (recorded at session start, e.g. by session-start-branch), else
+# the remote's default branch (origin/HEAD), else "main".
+resolve_base() {
+  if [ -n "${MUX_BASE:-}" ]; then printf '%s\n' "$MUX_BASE"; return; fi
+  if [ -f .mux/base ]; then
+    local b; b="$(head -n1 .mux/base 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$b" ] && { printf '%s\n' "$b"; return; }
+  fi
+  local d; d="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  [ -n "$d" ] && { printf '%s\n' "$d"; return; }
+  printf 'main\n'
+}
+
 # Refuse an illegal transition with a clear message.
 require_status() {
   local f="$1" want="$2" have
@@ -372,6 +388,56 @@ cmd_ok() {
   append_block "$f" "# Commit: $sha
 # Branch: $br"
   echo "✓ ${f##*/} committed ($sha on $br) — awaiting push"
+}
+
+# End & push: FINALIZE the session. Push the current branch to its upstream,
+# clear the COMMITTED tasks it shipped, return to the base branch, and tear the
+# loop + web UI down. This is how you END a session — the outward-facing
+# counterpart to `mux stop` (which only halts the loop/UI and leaves the branch,
+# its commits, and the queue untouched so the session can resume later).
+cmd_end() {
+  # Refuse while un-reviewed work exists: a RUNNING task or a tree dirty outside
+  # .mux must be resolved (approve/revert) first — `end` only ships already-
+  # COMMITTED work, never half-finished edits.
+  local f
+  for f in "$TASKS"/*.task.md; do
+    [ "$(task_status "$f")" = RUNNING ] && die "a task is still RUNNING — approve or revert the running task before ending the session"
+  done
+  git_clean || die "working tree not clean outside .mux — approve or revert the running task before ending the session"
+
+  local branch base; branch="$(git branch --show-current 2>/dev/null || true)"
+  [ -n "$branch" ] || die "detached HEAD — checkout a branch before ending the session"
+  base="$(resolve_base)"
+
+  # Push outward — NEVER force, never switch-to-push. Use the existing upstream
+  # if set, otherwise establish one. On ANY failure (auth, non-fast-forward)
+  # leave the WHOLE session intact: clear nothing, don't checkout away, exit
+  # non-zero so the user can fix the error above and retry. (An "everything
+  # up-to-date" push is a harmless success — no commits to push still ends.)
+  echo "↑ pushing $branch …"
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    git push || die "push failed — session left intact; fix the error above and retry"
+  else
+    git push -u origin HEAD || die "push failed — session left intact; fix the error above and retry"
+  fi
+
+  # Push succeeded — the COMMITTED tasks are now pushed. Their work is already in
+  # done.log, so remove the files to clear them off the board.
+  local cleared=0 st
+  for f in "$TASKS"/*.task.md; do
+    st="$(task_status "$f")"
+    [ "$st" = COMMITTED ] && { rm -f "$f"; cleared=$((cleared+1)); }
+  done
+  echo "✓ pushed $branch — cleared $cleared committed task(s)"
+
+  # Return to the base branch (a dirty .mux/ queue never blocks the checkout).
+  if [ "$branch" != "$base" ]; then
+    if git checkout "$base" 2>/dev/null; then echo "↳ back on $base"
+    else echo "⚠ could not checkout $base — staying on $branch"; fi
+  fi
+
+  # Tear this repo's loop + web UI down (same machinery as `mux stop`).
+  cmd_stop
 }
 
 cmd_changes() {
@@ -676,6 +742,7 @@ case "$cmd" in
   revert)         cmd_revert "$@" ;;
   delete|rm)      cmd_delete "$@" ;;
   ok)             cmd_ok "$@" ;;
+  end)            cmd_end "$@" ;;
   changes)        cmd_changes "$@" ;;
   show)           cmd_show "$@" ;;
   ls|status)      cmd_status "$@" ;;

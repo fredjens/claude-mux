@@ -34,7 +34,26 @@ function drawBranch(g){const el=E("branch");if(!el)return
  else{if(g.ahead>0)extra+=' <span class=branch-ahead>↑'+g.ahead+'</span>'
   if(g.behind>0)extra+=' <span class=branch-behind>↓'+g.behind+'</span>'}
  if(g.dirty>0)extra+=' <span class=branch-dirty>±'+g.dirty+'</span>'
- el.innerHTML=esc(g.branch)+extra}
+ el.innerHTML=esc(g.branch)+extra
+ lastGit=g;drawEnd()}
+// "End & push": the single session-finalize action. The count it advertises is
+// how many commits a push would ship — the upstream ahead-count when there's an
+// upstream, else the number of COMMITTED tasks (a fresh branch has no ahead yet).
+let lastGit=null,committedCount=0
+function shipCount(){const g=lastGit
+ return (g&&g.upstream&&g.ahead!=null)?g.ahead:committedCount}
+function drawEnd(){const b=E("endbtn");if(!b)return
+ const n=shipCount();b.innerHTML="End &amp; push"+(n>0?" ↑"+n:"")}
+// One CONFIRM that spells out EXACTLY what happens in plain words — this pushes
+// outward and tears the session down, so it must never fire by accident.
+function endSession(){const g=lastGit||{},n=shipCount()
+ const where=g.branch?("'"+g.branch+"'"+(g.upstream?" to its upstream":" to a new origin/"+g.branch)):"the current branch"
+ const msg="Push "+n+" commit"+(n==1?"":"s")+" — "+where+" — and END this session?\n\n"+
+  "This pushes your commits outward, clears the committed tasks from the board, "+
+  "returns to the base branch, and stops the loop + this UI.\n\n"+
+  "(To end WITHOUT pushing, stop the CLI instead — Ctrl-C or `mux stop` — which leaves the branch and queue intact to resume later.)"
+ if(!confirm(msg))return
+ act("end")}
 // Conway's Game of Life brand mark in the header. Toroidal so it never settles
 // into a static board; reseeds if it empties or stalls. Always visible as a
 // logo: it animates while a task is executing and freezes on its last frame
@@ -158,6 +177,7 @@ function buttons(t){const b=[],f=t.file
  return `<div class=acts>${b.join("")}</div>`}
 async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()
+ committedCount=ts.filter(t=>t.status=="COMMITTED").length;drawEnd()
  const order={RUNNING:0,BLOCKED:1,READY:2,DRAFT:3,DONE:4,COMMITTED:4,FAILED:5}; const rank=s=>order[s]??3; ts.sort((a,b)=>rank(a.status)-rank(b.status))
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">`+
   `${t.next?`<span class=nextlbl>next</span>`:t.status=="RUNNING"?`<span class="runword${t.executing?" live":""}">${t.status}</span>`:t.status}`+
