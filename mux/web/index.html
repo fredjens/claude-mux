@@ -3,8 +3,8 @@
  :root{--accent:__ACCENT__;--ok:__OK__;--sub:__SUB__;--danger:__DANGER__}
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:#1a1815;color:#e3ddd1}
  header{padding:10px 16px;background:#1a1815;border-bottom:1px solid #2a2620;display:flex;gap:12px;align-items:center}
- header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font:inherit;cursor:pointer;border:1px solid #2a2620;
-  background:transparent;color:#a89e8e;border-radius:4px;padding:3px 9px} button:hover{border-color:var(--accent);color:#e3ddd1}
+ header b{color:#ffffff;font-weight:600} header .sp{flex:1} button{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #2a2620;
+  background:transparent;color:#a89e8e;border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:#e3ddd1}
  #provider{color:#8a8072;white-space:nowrap}
  main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
  /* Narrow viewport: stack Queue above Output and let the page scroll
@@ -51,7 +51,7 @@
  body.drawer-open #backdrop{opacity:1;pointer-events:auto}
  body.drawer-open #drawer{transform:translateX(0)}
  #drawer .dhead{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px;border-bottom:1px solid #2a2620;background:#13110e}
- #drawer .dclose{font:inherit;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#e3ddd1;border-radius:6px;padding:1px 9px;line-height:1.4}
+ #drawer .dclose{font-family:ui-monospace,Menlo,monospace;font-size:12px;cursor:pointer;border:1px solid #3a342c;background:#241f1a;color:#e3ddd1;border-radius:6px;padding:2px 8px;line-height:1.4}
  #drawer .dclose:hover{border-color:var(--accent)}
  #drawer iframe{flex:1;width:100%;border:0;background:#1a1815}
 </style>
