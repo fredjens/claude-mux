@@ -123,3 +123,34 @@
  #drawer .dbody{flex:1;position:relative}
  #drawer .dframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--mux-bg);display:none}
  #drawer .dframe.active{display:block}
+ /* Ship confirm modal: a centered card over a dimmed backdrop. Hidden until
+    .open is toggled on. Mirrors the drawer's backdrop/transition language. */
+ #shipmodal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+  background:var(--mux-backdrop);opacity:0;pointer-events:none;transition:opacity .18s ease}
+ #shipmodal.open{opacity:1;pointer-events:auto}
+ #shipmodal .shipcard{width:min(440px,calc(100vw - 32px));background:var(--mux-panel);
+  border:1px solid var(--mux-border-strong);border-radius:8px;padding:18px 20px 16px;
+  box-shadow:0 18px 50px rgba(0,0,0,.5);transform:translateY(8px) scale(.98);transition:transform .18s ease}
+ #shipmodal.open .shipcard{transform:none}
+ #shipmodal .shiptitle{display:flex;align-items:center;gap:8px;margin:0 0 14px;font-family:var(--mux-sans);
+  font-size:15px;font-weight:600;color:var(--mux-text-strong)}
+ #shipmodal .shipglyph{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+  border-radius:4px;background:var(--ok);color:var(--mux-bg);font-size:13px;font-weight:700}
+ #shipmodal .shipmeta{margin:0 0 14px;padding:10px 12px;background:var(--mux-bg);border:1px solid var(--mux-border);
+  border-radius:6px;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12.5px}
+ #shipmodal .shipmeta dt{color:var(--mux-text-muted);font-family:var(--mux-sans);text-transform:uppercase;
+  letter-spacing:.06em;font-size:11px;align-self:center}
+ #shipmodal .shipmeta dd{margin:0;color:var(--mux-text);word-break:break-word}
+ #shipmodal .shipmeta .b-arrow{color:var(--mux-text-muted);margin:0 5px}
+ #shipmodal .shipmeta .b-ins{color:#aed99a;margin-left:6px}
+ #shipmodal .shipmeta .b-del{color:#e8a0ac;margin-left:5px}
+ #shipmodal .shipmeta .b-none{color:var(--mux-text-muted)}
+ #shipmodal .shipbody{margin:0 0 10px;font-size:12.5px;line-height:1.5;color:var(--mux-text-dim)}
+ #shipmodal .shipnote{margin:0 0 16px;font-size:11.5px;line-height:1.5;color:var(--mux-text-muted)}
+ #shipmodal .shipnote code{background:var(--mux-chip);padding:1px 4px;border-radius:3px}
+ #shipmodal .shipacts{display:flex;justify-content:flex-end;gap:8px}
+ #shipmodal .shipacts button{font-family:var(--mux-sans);font-size:12.5px;padding:6px 14px;border-radius:4px}
+ #shipmodal .shipcancel{background:transparent;border:1px solid var(--mux-border-strong);color:var(--mux-text-dim)}
+ #shipmodal .shipcancel:hover{border-color:var(--mux-text-muted);color:var(--mux-text)}
+ #shipmodal .shipgo{display:inline-flex;align-items:center;gap:6px}
+ #shipmodal .shipgo[disabled]{opacity:.6;cursor:default;filter:none}

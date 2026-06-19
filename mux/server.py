@@ -151,7 +151,8 @@ def git_branch_state():
     .mux/ queue is metadata, never counts as work). files/ins/del are the diffstat
     of the about-to-ship work — the upstream range when there's an upstream, else
     against the base branch — 0 when nothing to ship."""
-    safe = {"branch": "", "upstream": False, "ahead": None, "behind": None,
+    safe = {"branch": "", "base": resolve_base(), "upstream": False,
+            "ahead": None, "behind": None,
             "dirty": 0, "files": 0, "ins": 0, "del": 0}
     try:
         st = subprocess.run(["git", "status", "--porcelain"], cwd=REPO,
@@ -176,7 +177,7 @@ def git_branch_state():
             return safe
         behind, ahead = c.stdout.split()
         stat = ship_diffstat("@{u}..HEAD")
-        return {"branch": safe["branch"], "upstream": True,
+        return {"branch": safe["branch"], "base": safe["base"], "upstream": True,
                 "ahead": int(ahead), "behind": int(behind), "dirty": dirty,
                 **stat}
     except (OSError, ValueError):
@@ -229,7 +230,8 @@ def idle_reason():
         if ready:
             return ("Idle — the working tree has uncommitted changes outside .mux/. "
                     "The output only runs from a clean tree — commit or stash them to start.")
-        return "Idle — uncommitted changes outside .mux/."
+        return ("Idle — the working tree has uncommitted changes outside .mux/, "
+                "and the board is empty. Commit or stash them, then add a task to start.")
     if ready:
         return "Idle — the next task is waiting on a dependency."
     return "No activity"

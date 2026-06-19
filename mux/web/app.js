@@ -80,16 +80,50 @@ function shipCount(){const g=lastGit
 // ahead-count (e.g. 30) arrives, and the number visibly jumps.
 function drawEnd(){const b=E("endbtn");if(!b)return
  const n=gitLoaded?shipCount():0;b.innerHTML='<span class=shiplbl>Ship</span>'+(n>0?'<span class=shipn>↥ '+n+'</span>':'')}
-// One CONFIRM that spells out EXACTLY what happens in plain words — this pushes
-// outward and tears the session down, so it must never fire by accident.
-function endSession(){const g=lastGit||{},n=shipCount()
- const where=g.branch?("'"+g.branch+"'"+(g.upstream?" to its upstream":" to a new origin/"+g.branch)):"the current branch"
- const msg="Push "+n+" commit"+(n==1?"":"s")+" — "+where+" — and END this session?\n\n"+
-  "This pushes your commits outward, clears the committed tasks from the board, "+
-  "returns to the base branch, and stops the loop + this UI.\n\n"+
-  "(To end WITHOUT pushing, stop the CLI instead — Ctrl-C or `mux stop` — which leaves the branch and queue intact to resume later.)"
- if(!confirm(msg))return
- act("end")}
+// The Ship action opens an in-app modal (see #shipmodal) that spells out EXACTLY
+// what a push+end does — this pushes outward and tears the session down, so it
+// must never fire by accident. The native confirm() it replaces was ugly and
+// gave no repo/branch/diffstat context.
+function endSession(){const g=lastGit||{},n=shipCount(),rn=(repoName||"this repo")
+ const where=g.upstream?"its upstream":("a new origin/"+(g.branch||"branch"))
+ // Branch → base, with the about-to-ship diffstat.
+ const ds=(g.files>0)
+  ? esc(g.files+" file"+(g.files==1?"":"s"))
+    +(g.ins?'<span class=b-ins>+'+g.ins+'</span>':'')
+    +(g.del?'<span class=b-del>−'+g.del+'</span>':'')
+  : '<span class=b-none>no file changes</span>'
+ const rows=[
+  ["Repo", esc(rn)],
+  ["Branch", esc(g.branch||"(current)")+'<span class=b-arrow>→</span>'+esc(g.base||"base")],
+  ["Pushes to", esc(where)],
+  ["Shipping", n+" commit"+(n==1?"":"s")],
+  ["Changes", ds]]
+ E("shipmeta").innerHTML=rows.map(([k,v])=>'<dt>'+k+'</dt><dd>'+v+'</dd>').join("")
+ const go=E("shipgo");go.disabled=false
+ go.innerHTML='<span>↥</span> Ship '+n+" commit"+(n==1?"":"s")
+ E("shipmodal").classList.add("open")}
+function closeShip(){const m=E("shipmodal");if(m)m.classList.remove("open")}
+// Confirm = push + end. The server tears itself down (returns to base, stops the
+// loop + this UI) as part of ending, so the /api/verb request will usually never
+// get a response — the fetch rejects with "Failed to fetch". That's SUCCESS, not
+// an error: we show a shipped state instead of the old misleading alert.
+function confirmShip(){const go=E("shipgo")
+ if(go){go.disabled=true;go.innerHTML='<span class=shimmer>Shipping…</span>'}
+ fetch("/api/verb",{method:"POST",headers:{"content-type":"application/json"},
+   body:JSON.stringify({verb:"end"})})
+  .then(r=>r.json()).then(d=>{
+   // A real response came back: only a genuine failure (e.g. dirty tree / RUNNING
+   // task) is an error — success means the teardown is in flight.
+   if(d&&d.ok===false){shipResult("Ship failed",d.out||"mux end returned an error.",false)}
+   else{shipResult("Session shipped","Pushed and ended — this dashboard is now shutting down.",true)}})
+  .catch(()=>{shipResult("Session shipped","Pushed and ended — this dashboard is now shutting down.",true)})}
+// Replace the modal body with a terminal result (the UI is going away on success,
+// so there's nothing to return to).
+function shipResult(title,body,ok){const card=document.querySelector("#shipmodal .shipcard")
+ if(!card){return}
+ card.innerHTML='<h2 class=shiptitle><span class=shipglyph'+(ok?'':' style="background:var(--danger)"')+'>'+(ok?'✓':'!')+'</span>'+esc(title)+'</h2>'+
+  '<p class=shipbody>'+esc(body)+'</p>'+
+  (ok?'':'<div class=shipacts><button class=shipcancel onclick="closeShip()">Close</button></div>')}
 // Conway's Game of Life brand mark in the header. Toroidal so it never settles
 // into a static board; reseeds if it empties or stalls. Always visible as a
 // logo: it animates while a task is executing and freezes on its last frame
@@ -260,6 +294,7 @@ async function refresh(){
   lastCycleCount=cycleCount}
  pollStatus()}
 golSeed();golDraw() // paint a static logo frame on load; refresh() animates it only while executing
-fetch("/api/repo").then(r=>r.json()).then(d=>{const p=d.repo,el=E("repo");el.textContent=p.replace(/\/+$/,"").split("/").pop()||p;el.title=p})
+let repoName=""
+fetch("/api/repo").then(r=>r.json()).then(d=>{const p=d.repo,el=E("repo");repoName=p.replace(/\/+$/,"").split("/").pop()||p;el.textContent=repoName;el.title=p})
 fetch("/api/auto").then(r=>r.json()).then(d=>{auto=d.enabled;drawAuto();refresh()})
 refresh();setInterval(refresh,2000);setInterval(drawWork,1000)
