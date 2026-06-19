@@ -32,6 +32,9 @@
   <p class=shipbody>This pushes your commits to their upstream, clears the
    committed tasks from the board, returns to the base branch, and stops the
    loop &amp; this dashboard.</p>
+  <p class=shipnote>It also <em>wipes</em> local mux state for this checkout —
+   the task queue (including un-run drafts), logs, and <code>NOTES.md</code> —
+   so the next session starts clean.</p>
   <p class=shipnote>To end <em>without</em> pushing, stop the CLI instead
    (<code>Ctrl-C</code> or <code>mux stop</code>) — that leaves the branch and
    queue intact to resume later.</p>

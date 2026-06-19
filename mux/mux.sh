@@ -467,6 +467,7 @@ cmd_end() {
     [ "$st" = COMMITTED ] && { rm -f "$f"; cleared=$((cleared+1)); }
   done
   echo "✓ pushed $branch — cleared $cleared committed task(s)"
+  echo "↳ wiped local mux state (.mux/)"
 
   # Return to the base branch (a dirty .mux/ queue never blocks the checkout).
   if [ "$branch" != "$base" ]; then
@@ -476,6 +477,18 @@ cmd_end() {
 
   # Tear this repo's loop + web UI down (same machinery as `mux stop`).
   cmd_stop
+
+  # Wipe ALL local mux working state so the next session on this checkout starts
+  # clean — no carried-over transcript/history, no stale NOTES.md, no leftover
+  # queue. .mux/ is gitignored, so a branch switch never touches it; only Ship
+  # resets it. This runs LAST, AFTER cmd_stop has read its pid files in
+  # .mux/run/, and ONLY on a successful push (the `die` calls above abort first
+  # on push failure, leaving .mux/ intact for retry). mux recreates the subdirs
+  # it needs lazily on the next run (cmd_tick mkdir -p .mux/log .mux/run,
+  # record_base mkdir -p .mux, the task queue on add/session start). Path is
+  # absolute via $REPO_ROOT — never depend on cwd. cmd_stop (the `stop` verb) is
+  # intentionally left non-destructive so a paused session can resume.
+  rm -rf "$REPO_ROOT/.mux"
 }
 
 cmd_changes() {

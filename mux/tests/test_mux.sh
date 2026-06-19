@@ -624,6 +624,52 @@ test_start_branch() {
   assert_nonzero "start rejects an invalid branch name"
 }
 
+# ==========================================================================
+# cmd_end (Ship): a SUCCESSFUL push wipes ALL local mux state under .mux/ so the
+# next session on this checkout starts clean; a FAILED push leaves it intact.
+# Push is exercised against a real bare remote (no stub needed) so it succeeds
+# offline; the failure path points origin at a non-existent path so push dies.
+# ==========================================================================
+test_end_wipes_state() {
+  header "end wipes local mux state on a successful push"
+  local d; d="$(setup_repo)"
+  # A bare remote + upstream so `git push` succeeds with no network.
+  local rem; rem="$(mktmp)"
+  ( cd "$rem" && git init -q --bare )
+  ( cd "$d" && git remote add origin "$rem" && git push -q -u origin HEAD )
+  # base = the current branch so end won't try to checkout away.
+  local cur; cur="$( cd "$d" && git branch --show-current )"
+  mkdir -p "$d/.mux/log" "$d/.mux/run"
+  echo '{}'  > "$d/.mux/log/output.jsonl"
+  echo note  > "$d/.mux/NOTES.md"
+  printf 'x\ty\tz\n' > "$d/.mux/done.log"
+  echo "$cur" > "$d/.mux/base"
+  mk_task "$d" "leftover-draft.task.md" DRAFT
+
+  m "$d" end
+  assert_zero "end exits 0 on a successful push"
+  assert_contains "end reports the wipe" "$OUT" "wiped local mux state"
+  assert "log transcripts are gone"    sh -c "! test -e '$d/.mux/log'"
+  assert "NOTES.md is gone"            sh -c "! test -e '$d/.mux/NOTES.md'"
+  assert "leftover DRAFT task is gone" sh -c "! test -e '$d/.mux/tasks/leftover-draft.task.md'"
+  assert "done.log is gone"            sh -c "! test -e '$d/.mux/done.log'"
+  assert "base marker is gone"         sh -c "! test -e '$d/.mux/base'"
+}
+
+test_end_push_fail_keeps_state() {
+  header "end leaves mux state intact when the push fails"
+  local d; d="$(setup_repo)"
+  # origin points at a path that does not exist + no upstream → push -u fails.
+  ( cd "$d" && git remote add origin "$d/no-such-remote.git" )
+  mkdir -p "$d/.mux/log"
+  echo note > "$d/.mux/NOTES.md"
+
+  m "$d" end
+  assert_nonzero "end fails when the push fails"
+  assert "mux state survives a failed push" test -d "$d/.mux"
+  assert "NOTES.md survives a failed push"  test -f "$d/.mux/NOTES.md"
+}
+
 # --- run -------------------------------------------------------------------
 test_add
 test_task_channel
@@ -647,6 +693,8 @@ test_resolve_id
 test_stop_kills_tick
 test_interrupted_marker
 test_start_branch
+test_end_wipes_state
+test_end_push_fail_keeps_state
 
 printf '\n\033[1m──────────────────────────────────────────\033[0m\n'
 printf '\033[1mTotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
