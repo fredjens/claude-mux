@@ -182,9 +182,9 @@ async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()
  const rank=s=>s=="DONE"?1:0; ts.sort((a,b)=>rank(a.status)-rank(b.status))
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
-  `${t.current?" ·current":""}${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
+  `${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
-  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span class="${t.executing?'shimmer':''}">${t.file.replace(/\.task\.md$/,"")}</span></div>`+
+  `<div class=nm onclick="openPlan('${t.file}')" title="open plan"><span>${t.file.replace(/\.task\.md$/,"")}</span></div>`+
   `${buttons(t)}</div>`).join("")||"<div style='color:#8a8480;font-size:12.5px'>No tasks</div>"
  // Animate the logo only while a task is actively executing; otherwise freeze
  // it on its last frame so it sits there as a static brand mark.
