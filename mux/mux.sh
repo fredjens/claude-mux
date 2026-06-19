@@ -804,59 +804,184 @@ start_new_branch() {
   fi
 }
 
-# Pick an EXISTING local branch from a numbered list (interactive prompt).
-start_pick_existing() {
-  local current; current="$(git branch --show-current 2>/dev/null || true)"
-  local -a brs=(); local b
-  while IFS= read -r b; do brs+=("$b"); done \
-    < <(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
-  [ ${#brs[@]} -gt 0 ] || die "no local branches found"
-  echo "existing branches:"
-  local i=1
-  for b in "${brs[@]}"; do
-    if [ "$b" = "$current" ]; then printf "  %2d) %s  (current)\n" "$i" "$b"
-    else printf "  %2d) %s\n" "$i" "$b"; fi
-    i=$((i+1))
-  done
-  printf "number> "
-  local n; IFS= read -r n || n=""
-  case "$n" in ''|*[!0-9]*) die "not a number — aborted" ;; esac
-  { [ "$n" -ge 1 ] && [ "$n" -le ${#brs[@]} ]; } || die "out of range — aborted"
-  local pick="${brs[$((n-1))]}"
-  if [ "$pick" = "$current" ]; then echo "▶ continuing on $pick"
-  else git checkout "$pick" || die "could not checkout $pick"; echo "▶ on branch $pick"; fi
+# Restore the terminal after the TUI: cursor back, main screen, echo on. Reads
+# the saved stty from the $_MUX_STTY global (set by start_tui) so it works as a
+# trap handler even when fired mid-pick (Ctrl-C). Always safe to call twice.
+_tui_restore() {
+  if [ -n "${_MUX_STTY:-}" ]; then stty "$_MUX_STTY" 2>/dev/null || stty echo 2>/dev/null
+  else stty echo 2>/dev/null || true; fi
+  tput cnorm 2>/dev/null || true
+  tput rmcup 2>/dev/null || true
 }
 
-# The fresh-start branch prompt. Shown ONLY on a genuinely fresh start (clean
-# tree, everything pushed, nothing RUNNING). Pressing Enter continues on the
-# current branch with zero friction; otherwise create a new branch or pick one.
-start_prompt() {
+# The fresh-start branch selector: a full-screen, keyboard-driven TUI in pure
+# bash (no external deps — this stays a portable shell script). Shown ONLY on a
+# genuinely fresh start AND only when both stdin/stdout are TTYs (the caller
+# gates that). Drives the alternate screen + hidden cursor and ALWAYS restores
+# them via trap — even on Ctrl-C mid-pick the terminal is left clean.
+#
+# Keys: ↑/↓ and k/j move (wraparound); Enter selects; printable chars filter
+# the existing-branch rows live (the two action rows stay pinned); Backspace
+# edits the filter; Esc or q cancel (== continue on current, zero friction).
+# Note: k, j and q are reserved for navigation/cancel, so they never enter the
+# filter string (every other printable char does).
+#
+# Outcomes print the SAME phrases as start_checkout so downstream is unchanged:
+#   continue → "▶ continuing on <branch>"
+#   create   → "✚ created branch <name> (off <base>) …"  + writes .mux/base
+#   existing → checkout + "▶ on branch <branch>"
+start_tui() {
   local current; current="$(git branch --show-current 2>/dev/null || echo '?')"
-  echo
-  echo "┌─ mux start ─ choose the branch for THIS session ──────────────"
-  echo "│ Everything you commit this session lands on the branch you pick."
-  echo "│"
-  echo "│   [Enter]      continue on current branch  →  $current"
-  echo "│   n <name>     create a NEW branch (off $current) and switch to it"
-  echo "│   e            choose an EXISTING branch"
-  echo "└───────────────────────────────────────────────────────────────"
-  printf "branch> "
-  local reply; IFS= read -r reply || reply=""
-  reply="${reply#"${reply%%[![:space:]]*}"}"          # left-trim
-  case "$reply" in
-    '')          echo "▶ continuing on $current" ;;
-    n|new)
-      printf "new branch name> "; local nm; IFS= read -r nm || nm=""
-      nm="$(printf '%s' "$nm" | tr -d '[:space:]')"
-      [ -n "$nm" ] || die "no branch name given — aborted"
-      start_new_branch "$nm" "$current" ;;
-    n\ *|new\ *)
-      local nm="${reply#* }"; nm="$(printf '%s' "$nm" | tr -d '[:space:]')"
-      [ -n "$nm" ] || die "no branch name given — aborted"
-      start_new_branch "$nm" "$current" ;;
-    e|existing)  start_pick_existing ;;
-    *)           die "unrecognized choice '$reply' — press Enter, or use:  n <name> | e" ;;
+
+  # Colors / attributes via tput (gated here — start_tui only runs under a TTY;
+  # no raw escapes are written anywhere else).
+  local C_RST C_DIM C_BOLD C_ACC C_SEL
+  C_RST="$(tput sgr0   2>/dev/null || true)"
+  C_DIM="$(tput dim    2>/dev/null || true)"
+  C_BOLD="$(tput bold  2>/dev/null || true)"
+  C_ACC="$(tput setaf 6 2>/dev/null || true)"                       # cyan accent
+  C_SEL="$(tput setab 6 2>/dev/null || true)$(tput setaf 0 2>/dev/null || true)"  # highlight bar
+
+  # Existing local branches (newest-committed first is overkill; refname order).
+  local -a branches=(); local b
+  while IFS= read -r b; do branches+=("$b"); done \
+    < <(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
+
+  # Context line: clean/dirty + commits ahead of upstream (if tracked).
+  local dirty ahead=""
+  if git_clean; then dirty="clean"; else dirty="dirty"; fi
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local n; n="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    [ "${n:-0}" -gt 0 ] && ahead="  ·  ${n} ahead"
+  fi
+
+  # Terminal setup + guaranteed restore (trap covers normal exit, die, Ctrl-C).
+  _MUX_STTY="$(stty -g 2>/dev/null || true)"
+  tput smcup 2>/dev/null || true; tput civis 2>/dev/null || true; stty -echo 2>/dev/null || true
+  trap '_tui_restore' EXIT
+  trap '_tui_restore; trap - EXIT; exit 130' INT TERM HUP
+
+  local rows_avail; rows_avail=$(( $(tput lines 2>/dev/null || echo 24) - 12 ))
+  [ "$rows_avail" -lt 3 ] && rows_avail=3
+
+  local filter="" hi=0 off=0 choice=""
+  while :; do
+    # Build the visible rows: two pinned action rows + filtered branches.
+    local -a rkind=() rval=()
+    rkind+=("continue"); rval+=("$current")
+    rkind+=("create");   rval+=("")
+    local lf; lf="$(printf '%s' "$filter" | tr '[:upper:]' '[:lower:]')"
+    for b in "${branches[@]}"; do
+      if [ -z "$filter" ] || printf '%s' "$b" | tr '[:upper:]' '[:lower:]' | grep -qF -- "$lf"; then
+        rkind+=("branch"); rval+=("$b")
+      fi
+    done
+    local nrows=${#rkind[@]}
+    [ "$hi" -ge "$nrows" ] && hi=$((nrows-1)); [ "$hi" -lt 0 ] && hi=0
+    [ "$hi" -lt "$off" ] && off=$hi
+    [ "$hi" -ge $((off+rows_avail)) ] && off=$((hi-rows_avail+1))
+
+    # --- render ----------------------------------------------------------
+    tput clear 2>/dev/null || true
+    printf '%s%s   _ __ ___  _   ___  __%s\n'   "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  | '"'"'_ \` _ \\| | | \\ \\/ /%s\n' "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  | | | | | | |_| |>  < %s\n'   "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s%s  |_| |_| |_|\\__,_/_/\\_\\%s\n'  "$C_ACC" "$C_BOLD" "$C_RST"
+    printf '%s   M U L T I P L E X E R%s\n'      "$C_DIM" "$C_RST"
+    printf '\n'
+    printf '%s  branch %s%s%s   ·   %s   tree%s\n' "$C_DIM" "$C_RST$C_BOLD" "$current" "$C_RST$C_DIM" "$dirty$ahead" "$C_RST"
+    printf '%s  pick the branch for THIS session — everything you commit lands there%s\n' "$C_DIM" "$C_RST"
+    printf '\n'
+
+    local i label
+    for ((i=off; i<nrows && i<off+rows_avail; i++)); do
+      case "${rkind[i]}" in
+        continue) label="▶ Continue on ${rval[i]}" ;;
+        create)   label="✚ Create a new branch…" ;;
+        branch)   label="⌖ ${rval[i]}"; [ "${rval[i]}" = "$current" ] && label="$label  (current)" ;;
+      esac
+      if [ "$i" -eq "$hi" ]; then printf '  %s %-56s%s\n' "$C_SEL" "$label" "$C_RST"
+      else                        printf '    %s\n' "$label"; fi
+    done
+
+    printf '\n'
+    if [ -n "$filter" ]; then printf '  %sfilter:%s %s_\n' "$C_DIM" "$C_RST" "$filter"
+    else printf '  %s↑/↓ move · type to filter · Enter select · Esc/q cancel%s\n' "$C_DIM" "$C_RST"; fi
+
+    # --- read one key ----------------------------------------------------
+    local k; IFS= read -rsn1 k || k=""
+    case "$k" in
+      "")                                       # Enter
+        choice="select"; break ;;
+      $'\x1b')                                  # ESC — maybe an arrow sequence
+        local rest=""; IFS= read -rsn2 -t 1 rest 2>/dev/null || rest=""
+        case "$rest" in
+          '[A'|'OA') hi=$(( (hi-1+nrows)%nrows )) ;;
+          '[B'|'OB') hi=$(( (hi+1)%nrows )) ;;
+          '')        choice="cancel"; break ;;  # bare Esc
+          *) ;;                                 # other escapes ignored
+        esac ;;
+      k) hi=$(( (hi-1+nrows)%nrows )) ;;
+      j) hi=$(( (hi+1)%nrows )) ;;
+      q) choice="cancel"; break ;;
+      $'\x7f'|$'\b') filter="${filter%?}" ;;    # Backspace
+      *) case "$k" in [[:print:]]) filter="$filter$k"; hi=0 ;; esac ;;
+    esac
+  done
+
+  # --- act on the choice (terminal restored first so prompts/echo work) ---
+  local kind="${rkind[hi]}" val="${rval[hi]}"
+  _tui_restore; trap - EXIT INT TERM HUP
+  case "$choice" in
+    cancel) echo "▶ continuing on $current" ;;
+    select)
+      case "$kind" in
+        continue) echo "▶ continuing on $current" ;;
+        create)
+          printf "new branch name> "; local nm; IFS= read -r nm || nm=""
+          nm="$(printf '%s' "$nm" | tr -d '[:space:]')"
+          [ -n "$nm" ] || die "no branch name given — aborted"
+          start_new_branch "$nm" "$current" ;;
+        branch)
+          if [ "$val" = "$current" ]; then echo "▶ continuing on $val"
+          else git checkout "$val" || die "could not checkout $val"; echo "▶ on branch $val"; fi ;;
+      esac ;;
   esac
+}
+
+# Periodic, in-place status line while a TTY session runs (Part of cmd_web).
+# Blocks until $wpid (the web server — the lifecycle owner) dies, refreshing a
+# single line every few seconds with: elapsed time, current branch, a task
+# tally (DRAFT/READY/RUNNING/COMMITTED parsed from each `# STATUS:`), and
+# whether the output loop is alive. TTY-only — the non-TTY path just `wait`s.
+start_status_loop() {
+  local wpid="$1" start now el mm ss cur opid alive
+  local C_DIM C_RST C_ACC; C_DIM="$(tput dim 2>/dev/null || true)"
+  C_RST="$(tput sgr0 2>/dev/null || true)"; C_ACC="$(tput setaf 6 2>/dev/null || true)"
+  start="$(date +%s)"
+  while kill -0 "$wpid" 2>/dev/null; do
+    local draft=0 ready=0 running=0 committed=0 f st
+    for f in "$TASKS"/*.task.md; do
+      [ -e "$f" ] || continue
+      st="$(task_status "$f")"
+      case "$st" in
+        DRAFT)     draft=$((draft+1)) ;;
+        READY)     ready=$((ready+1)) ;;
+        RUNNING)   running=$((running+1)) ;;
+        COMMITTED) committed=$((committed+1)) ;;
+      esac
+    done
+    cur="$(git branch --show-current 2>/dev/null || echo '?')"
+    opid="$(cat .mux/run/output.pid 2>/dev/null || true)"
+    if [ -n "$opid" ] && kill -0 "$opid" 2>/dev/null; then alive="up"; else alive="down"; fi
+    now="$(date +%s)"; el=$((now-start)); mm=$((el/60)); ss=$((el%60))
+    printf '\r%s%s  mux ⟳ %02d:%02d  ·  %s  ·  tasks D%d R%d ▶%d ✓%d  ·  output %s%s' \
+      "$(tput el 2>/dev/null || true)" "$C_DIM" "$mm" "$ss" "$cur" \
+      "$draft" "$ready" "$running" "$committed" "$alive" "$C_RST"
+    sleep 3
+  done
+  printf '\r%s' "$(tput el 2>/dev/null || true)"
+  wait "$wpid" 2>/dev/null || true
 }
 
 cmd_web() {
@@ -873,8 +998,8 @@ cmd_web() {
   fi
   if [ -n "$branch_arg" ]; then
     start_checkout "$branch_arg"                          # mux start <branch> [port]
-  elif [ -t 0 ] && { [ -n "$force_new" ] || ! session_in_flight; }; then
-    start_prompt                                          # fresh start → choose a branch
+  elif [ -t 0 ] && [ -t 1 ] && { [ -n "$force_new" ] || ! session_in_flight; }; then
+    start_tui                                             # fresh start → interactive picker
   else
     local cur; cur="$(git branch --show-current 2>/dev/null || true)"
     [ -n "$cur" ] && echo "▶ continuing on $cur"          # in-flight → zero-friction resume
@@ -903,7 +1028,10 @@ cmd_web() {
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
     [ -n "$opener" ] && ( sleep 0.6; "$opener" "http://127.0.0.1:$port" ) >/dev/null 2>&1 &
   fi
-  wait "$wpid"
+  # On a TTY, keep showing periodic live status; otherwise block silently (so
+  # logs/CI aren't spammed). Either way the EXIT/INT/TERM/HUP trap above owns
+  # teardown — start_status_loop only blocks until $wpid dies, then reaps it.
+  if [ -t 1 ]; then start_status_loop "$wpid"; else wait "$wpid"; fi
 }
 
 cmd_help() { sed -n '2,/^$/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
