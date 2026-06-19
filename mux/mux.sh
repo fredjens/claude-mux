@@ -28,11 +28,11 @@
 #                               place — no DRAFT->READY rewrite)
 #   mux block    <id> <q...>    RUNNING-> BLOCKED (park with a question)
 #   mux resolve  <id> [a...]    BLOCKED-> READY   (answer + re-queue)
-#   mux ok       [note...]      approve RUNNING: commit the changes -> DONE
+#   mux ok       [note...]      approve RUNNING: commit -> COMMITTED (awaiting push)
 #   mux changes  <note...>      ask the RUNNING task for a revision (stays RUNNING)
 #   mux revert                  reject RUNNING: discard the changes -> FAILED
 #   mux fail     <id> <why...>  RUNNING-> FAILED  (output: discard + reason)
-#   mux delete   <id>           remove a FAILED task file (clear it off the board)
+#   mux delete   <id>           remove a DRAFT/FAILED/COMMITTED task file (clear it off the board)
 #   mux help
 #
 # <id> is any unique substring of a task's filename (usually its slug).
@@ -117,12 +117,16 @@ task_session() { grep -m1 -i '^# Session:' "$1" | sed 's/.*Session:[[:space:]]*/
 # The planner (channel) session id that authored this task; lets `direct ⇥`
 # resume that exact planning conversation (separate from the output's # Session:).
 task_channel() { grep -m1 -i '^# Channel:' "$1" | sed 's/.*Channel:[[:space:]]*//' | awk '{print $1}' || true; }
+# The short SHA recorded on a COMMITTED task (empty until `mux ok` writes it).
+task_commit() { grep -m1 -i '^# Commit:' "$1" | sed 's/.*Commit:[[:space:]]*//' | awk '{print $1}' || true; }
 
-# Is a dependency satisfied? $1 = the dependency's task filename. Approved tasks
-# are DELETED (their file is gone), so the real check is the done.log ledger; the
-# first clause is belt-and-suspenders for a lingering DONE file.
+# Is a dependency satisfied? $1 = the dependency's task filename. A committed
+# task's work IS committed, so a lingering COMMITTED (or DONE) file satisfies it;
+# once pushed and removed the done.log ledger keeps it satisfied.
 dep_is_done() {
-  [ -f "$TASKS/$1" ] && [ "$(task_status "$TASKS/$1")" = DONE ] && return 0
+  if [ -f "$TASKS/$1" ]; then
+    case "$(task_status "$TASKS/$1")" in DONE|COMMITTED) return 0 ;; esac
+  fi
   [ -f "$DONE_LOG" ] && grep -qxF -- "$1" <(cut -f1 "$DONE_LOG") && return 0
   return 1
 }
@@ -327,14 +331,16 @@ cmd_revert() {
 # FAILED task may be deleted — its changes are already discarded, so there is
 # nothing left to lose; any other state must go through the lifecycle first.
 # Delete a task file outright. Allowed only from a state with nothing to lose:
-# DRAFT (never ran) or FAILED (already discarded). A READY/RUNNING/BLOCKED/DONE
-# task is refused — unrelease/revert/fail it first.
+# DRAFT (never ran), FAILED (already discarded), or COMMITTED (work is already
+# committed and in done.log — an escape hatch to clear it off the board by hand
+# when you pushed elsewhere). A READY/RUNNING/BLOCKED task is refused —
+# unrelease/revert/fail it first.
 cmd_delete() {
   [ $# -ge 1 ] || die "usage: mux delete <id>"
   local f st; f="$(resolve_id "$1")"; st="$(task_status "$f")"
   case "$st" in
-    DRAFT|FAILED) ;;
-    *) die "${f##*/} is $st — only a DRAFT or FAILED task can be deleted" ;;
+    DRAFT|FAILED|COMMITTED) ;;
+    *) die "${f##*/} is $st — only a DRAFT, FAILED, or COMMITTED task can be deleted" ;;
   esac
   rm -f "$f"
   echo "🗑 ${f##*/} deleted"
@@ -353,11 +359,15 @@ cmd_ok() {
   git commit -q -m "$(commit_message "$f" "$*")" || die "git commit failed"
   local sha br; sha="$(git rev-parse --short HEAD)"; br="$(git branch --show-current 2>/dev/null || echo '?')"
   # The commit is now the permanent record. Note it in the done.log ledger (so a
-  # `# Depends-on:` on this task still resolves once its file is gone), then
-  # delete the task file — .mux/tasks/ only ever holds live, not-yet-done work.
+  # `# Depends-on:` on this task still resolves even after the file is finally
+  # removed at push), then transition the task IN PLACE to COMMITTED — it lingers
+  # on the board as "committed, not yet pushed" until a later push clears it. The
+  # working tree is now clean, so cmd_next flows on and COMMITTED never gates it.
   printf '%s\t%s\t%s\n' "${f##*/}" "$sha" "$(stamp)" >> "$DONE_LOG"
-  rm -f "$f"
-  echo "✓ ${f##*/} committed ($sha on $br) — task file removed"
+  set_status "$f" COMMITTED
+  append_block "$f" "# Commit: $sha
+# Branch: $br"
+  echo "✓ ${f##*/} committed ($sha on $br) — awaiting push"
 }
 
 cmd_changes() {
@@ -395,6 +405,10 @@ cmd_status() {
     fi
     grep -qi '^## Approved' "$f" && note="$note (approved)"
     [ "$status" = BLOCKED ] && note=" (awaiting answer)"
+    if [ "$status" = COMMITTED ]; then
+      local sha; sha="$(task_commit "$f")"
+      note=" (committed${sha:+ $sha} — awaiting push)"
+    fi
     dep="$(task_dep "$f")"
     if [ -n "$dep" ]; then
       depstatus=pending
@@ -412,7 +426,7 @@ cmd_status() {
 cmd_status_json() {
   local tasks=( "$TASKS"/*.task.md )
   [ ${#tasks[@]} -gt 0 ] || { printf '[]\n'; return 0; }
-  local f status dep depstatus approved awaiting current next exec_now interrupted session next_marked=0 sep=""
+  local f status dep depstatus approved awaiting current next exec_now interrupted session commit next_marked=0 sep=""
   local executing=false; [ -d .mux/tick.lock ] && executing=true
   # Interrupted is live only while the tree is dirty (see cmd_status).
   local dirty=false; git_clean || dirty=true
@@ -436,8 +450,10 @@ cmd_status_json() {
     fi
     session="$(task_session "$f")"
     if [ -n "$session" ]; then session="\"$(json_escape "$session")\""; else session=null; fi
-    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s,"session":%s}' \
-      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus" "$session"
+    commit="$(task_commit "$f")"
+    if [ -n "$commit" ]; then commit="\"$(json_escape "$commit")\""; else commit=null; fi
+    printf '%s{"file":"%s","status":"%s","current":%s,"next":%s,"executing":%s,"interrupted":%s,"approved":%s,"awaiting_answer":%s,"depends_on":%s,"dep_status":%s,"session":%s,"commit":%s}' \
+      "$sep" "$(json_escape "${f##*/}")" "$status" "$current" "$next" "$exec_now" "$interrupted" "$approved" "$awaiting" "$dep" "$depstatus" "$session" "$commit"
     sep=","
   done
   printf ']\n'

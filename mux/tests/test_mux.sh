@@ -249,25 +249,29 @@ test_block_resolve() {
 }
 
 # ==========================================================================
-# 6. ok commits exactly one commit on the current branch, DELETES the task file
-#    (the commit is the record), excludes .mux from the commit. ok with no
-#    changes refused.
+# 6. ok commits exactly one commit on the current branch, transitions the task
+#    to COMMITTED IN PLACE (recording the SHA + branch on the file), excludes
+#    .mux from the commit. ok with no changes refused.
 # ==========================================================================
 test_ok_commit() {
-  header "ok commits one commit (excluding .mux) and removes the task file"
+  header "ok commits one commit (excluding .mux) and marks the task COMMITTED"
   local d; d="$(setup_repo)"
   local f="$d/.mux/tasks/20200101-000000-okc.task.md"
   mk_task "$d" "20200101-000000-okc.task.md" RUNNING
   echo "feature code" > "$d/app.txt"             # real (non-.mux) file change
 
-  local before after files
+  local before after files sha
   before="$(cd "$d" && git rev-list --count HEAD)"
   m "$d" ok "looks good"
   assert_zero "ok exits 0 when there are real file changes"
   after="$(cd "$d" && git rev-list --count HEAD)"
   assert_eq "exactly one new commit was created" "$after" "$((before+1))"
-  assert "task file is removed after ok" test ! -e "$f"
-  assert_contains "ok reports the file was removed" "$OUT" "task file removed"
+  assert "task file stays after ok" test -e "$f"
+  assert_status "ok marks the task COMMITTED" COMMITTED "$f"
+  assert_contains "ok reports it is awaiting push" "$OUT" "awaiting push"
+  sha="$(cd "$d" && git rev-parse --short HEAD)"
+  assert_file_contains "the short SHA is recorded on the task" "^# Commit: $sha" "$f"
+  assert_file_contains "the branch is recorded on the task" "^# Branch: " "$f"
 
   files="$(cd "$d" && git show --name-only --pretty=format: HEAD)"
   assert_contains "the commit includes the real file" "$files" "app.txt"
@@ -287,10 +291,11 @@ test_ok_commit() {
 
 # ==========================================================================
 # 6b. ok writes the full Goal block into the commit body (more than one line),
-#     and the approved task no longer appears on the board (status --json).
+#     and the approved task still appears on the board as COMMITTED carrying its
+#     short SHA (status --json).
 # ==========================================================================
 test_ok_commit_summary_and_board() {
-  header "ok puts the whole Goal in the commit body and drops the task from the board"
+  header "ok puts the whole Goal in the commit body and keeps the task as COMMITTED"
   command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
   local d; d="$(setup_repo)"
   local f="$d/.mux/tasks/20200101-000000-sum.task.md"
@@ -318,27 +323,29 @@ test_ok_commit_summary_and_board() {
 
   m "$d" status --json
   assert_zero "status --json exits 0 after the task is approved"
-  case "$OUT" in *"20200101-000000-sum.task.md"*) no "approved task still listed on the board";; *) ok "approved task no longer listed on the board";; esac
+  case "$OUT" in *"20200101-000000-sum.task.md"*) ok "committed task still listed on the board";; *) no "committed task missing from the board";; esac
+  assert_contains "the board reports it COMMITTED" "$OUT" '"status":"COMMITTED"'
+  case "$OUT" in *'"commit":"'*) ok "the JSON carries a commit SHA";; *) no "the JSON is missing the commit SHA";; esac
 }
 
 # ==========================================================================
-# 6c. A READY task that Depends-on an already-approved (deleted) task is still
-#     pickable: status --json reports its dep done and mux next chooses it.
+# 6c. A READY task that Depends-on an already-approved (now COMMITTED) task is
+#     still pickable: status --json reports its dep done and mux next chooses it.
 # ==========================================================================
 test_depends_on_deleted_dep() {
-  header "a dep that was approved (deleted) still resolves via done.log"
+  header "a dep that was approved (COMMITTED) still satisfies a dependent"
   command -v python3 >/dev/null 2>&1 || { no "python3 not available to validate JSON"; return; }
   local d; d="$(setup_repo)"
   local dep="20200101-000000-depdel.task.md"
-  # Approve the dependency so its file is deleted and it's recorded in done.log.
+  # Approve the dependency so it becomes COMMITTED and is recorded in done.log.
   mk_task "$d" "$dep" RUNNING
   echo "dep code" > "$d/dep.txt"
   m "$d" ok
   assert_zero "approving the dependency exits 0"
-  assert "dependency file was deleted" test ! -e "$d/.mux/tasks/$dep"
-  assert_file_contains "done.log records the deleted dependency" "$dep" "$d/.mux/done.log"
+  assert_status "dependency is now COMMITTED" COMMITTED "$d/.mux/tasks/$dep"
+  assert_file_contains "done.log records the committed dependency" "$dep" "$d/.mux/done.log"
 
-  # A dependent task pointing at the now-deleted dep must read as satisfied.
+  # A dependent task pointing at the now-COMMITTED dep must read as satisfied.
   mk_task "$d" "20200102-000000-depdent.task.md" READY "# Depends-on: $dep"
   m "$d" status --json
   assert_zero "status --json exits 0"
