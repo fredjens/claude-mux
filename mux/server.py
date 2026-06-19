@@ -189,38 +189,18 @@ def result_summary(ev):
     return "Σ " + " · ".join(segs) if segs else ""
 
 
-# A fixed, deterministic Game of Life seed rendered as a multi-line text frame
-# that replaces the old "cycle N" divider; successive run dividers show
-# successive generations, so reading down the log plays a GOL flipbook.
-#
-# The old seed was four sparse gliders that quickly thinned to a handful of
-# drifting blocks — a near-empty board. Instead we start from a dense, fixed
-# pseudo-random bitmap (~42% of cells alive) computed once from a deterministic
-# spatial hash (NO `random` — same grid every run). On the small toroidal board
-# this evolves into a churning soup that stays substantially populated and
-# varied for dozens of generations, so every cycle divider reads as alive and
-# busy rather than empty.
-_GOL_COLS, _GOL_ROWS = 24, 8
-_GOL_SEED = {
-    (x, y)
-    for y in range(_GOL_ROWS)
-    for x in range(_GOL_COLS)
-    # Deterministic spatial hash → ~40% fill. Mixing three large primes (the
-    # classic xor-hash constants) avoids the visible diagonal banding a plain
-    # `(x + y) % n` would give, so the seed looks irregular/organic.
-    if (x * 73856093 ^ y * 19349663 ^ (x * y) * 83492791) % 10 < 4
-}
 # Short, fun kickoff phrases riffing on the MULTIPLEXER / channels / signals
-# lingo. 12 entries; gol_frame indexes with a stride coprime to 12 so the
-# banner walks the whole list deterministically without real randomness.
-_GOL_PHRASES = [
+# lingo, rendered as the cycle divider in the output log. 12 entries;
+# cycle_divider indexes with a stride coprime to 12 so the banner walks the
+# whole list deterministically without real randomness.
+_CYCLE_PHRASES = [
     "switching channels…",
     "routing the next signal…",
     "the bus is hot…",
     "multiplexing resumes…",
     "patching in a fresh channel…",
-    "crossbar engaged…",
-    "demuxing the queue…",
+    "the switch flips through…",
+    "fanning out the queue…",
     "signal on the wire…",
     "the executor wakes…",
     "tapping the stream…",
@@ -229,40 +209,14 @@ _GOL_PHRASES = [
 ]
 
 
-def gol_frame(gen):
-    """Render generation `gen` of the fixed GOL seed as a divider for a new
-    cycle. Returns two log items: a bright "▶"-led kickoff banner and the dim
-    multi-line GOL grid block beneath it. Toroidal (wrap) edges. Cheap: a tiny
-    grid advanced a few dozen steps plus a constant phrase lookup, recomputed
-    each poll."""
-    cols, rows = _GOL_COLS, _GOL_ROWS
-    grid = [[1 if (x, y) in _GOL_SEED else 0 for x in range(cols)]
-            for y in range(rows)]
-    for _ in range(max(0, gen)):
-        nxt = [[0] * cols for _ in range(rows)]
-        for y in range(rows):
-            for x in range(cols):
-                c = 0
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        if dx or dy:
-                            c += grid[(y + dy) % rows][(x + dx) % cols]
-                alive = grid[y][x]
-                nxt[y][x] = 1 if (c == 3 or (alive and c == 2)) else 0
-        grid = nxt
-    rule = "─" * (cols + 2)
-    body = "\n".join(" " + "".join("█" if c else " " for c in row)
-                     for row in grid)
-    # A fun, accent-styled kickoff banner above the dim grid. Deterministic from
-    # `gen` (no randomness) but visits the whole pool via a stride coprime with
-    # its length (7 vs 12) so consecutive runs jump around and feel random.
-    banner = "▶ " + _GOL_PHRASES[(max(0, gen) * 7) % len(_GOL_PHRASES)]
-    # The grid block leads with the recognized "─" divider marker so it picks up
-    # the muted divider styling (class `ls`); the embedded newlines render as one
-    # block because `#log` is `white-space:pre-wrap`. The banner is a SEPARATE
-    # item leading with "▶" so the UI styles it as its own bright line (class
-    # `lk`) above — not part of — the dim grid div.
-    return [banner, rule + "\n" + body + "\n" + rule]
+def cycle_divider(gen):
+    """Return the kickoff banner for a new cycle: a single bright "▶"-led log
+    item carrying one of the themed phrases. `gen` (the 0-based cycle index)
+    picks the phrase deterministically — no randomness — but a stride coprime
+    with the pool length (7 vs 12) walks the whole list so consecutive runs
+    jump around and feel random. The leading "▶" makes the UI style it as its
+    own bright divider line (class `lk`)."""
+    return ["▶ " + _CYCLE_PHRASES[(max(0, gen) * 7) % len(_CYCLE_PHRASES)]]
 
 
 def log_lines(limit=300):
@@ -294,10 +248,10 @@ def log_lines(limit=300):
                 # (it carries a fresh session_id). All other system subtypes
                 # (thinking_tokens, hook_started, …) must NOT draw a divider.
                 cycle += 1
-                # The number is never shown; we only use it to pick WHICH GOL
-                # generation to render, so successive run dividers play a
-                # flipbook (gen N, N+1, …). cycle 1 → seed (gen 0).
-                out.extend(gol_frame(cycle - 1))
+                # The number is never shown; we only use it to pick WHICH
+                # phrase the divider shows, so successive run dividers walk the
+                # phrase pool. cycle 1 → phrase index 0.
+                out.extend(cycle_divider(cycle - 1))
                 thinking = False
             elif sub == "thinking_tokens":
                 # Collapse consecutive thinking events into one muted line.
