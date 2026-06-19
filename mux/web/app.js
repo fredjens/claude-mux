@@ -60,22 +60,26 @@ async function pollStatus(){try{const s=await (await fetch("/api/status")).json(
 // the "End & push" button, not here. Quiet (just the name) when there's nothing
 // to show; a muted "no upstream" hint on a fresh branch. Reflects the last fetch.
 function drawBranch(g){const el=E("branch");if(!el)return
+ gitLoaded=true
  if(!g||!g.branch){el.innerHTML="";return}
  let extra=""
  if(!g.upstream)extra=' <span class=branch-sub>no upstream</span>'
  else if(g.behind>0)extra+=' <span class=branch-behind>↓'+g.behind+'</span>'
  if(g.dirty>0)extra+=' <span class=branch-dirty>±'+g.dirty+'</span>'
- if(g.files>0)extra+=' <span class=branch-sub>'+g.files+' file'+(g.files==1?'':'s')+(g.ins?' +'+g.ins:'')+(g.del?' −'+g.del:'')+'</span>'
+ if(g.files>0)extra+=' <span class=branch-sub>'+g.files+' file'+(g.files==1?'':'s')+'</span>'+(g.ins?' <span class=branch-ins>+'+g.ins+'</span>':'')+(g.del?' <span class=branch-del>−'+g.del+'</span>':'')
  el.innerHTML=esc(g.branch)+extra
  lastGit=g;drawEnd()}
 // "End & push": the single session-finalize action. The count it advertises is
 // how many commits a push would ship — the upstream ahead-count when there's an
 // upstream, else the number of COMMITTED tasks (a fresh branch has no ahead yet).
-let lastGit=null,committedCount=0
+let lastGit=null,committedCount=0,gitLoaded=false
 function shipCount(){const g=lastGit
  return (g&&g.upstream&&g.ahead!=null)?g.ahead:committedCount}
+// Hold the count back until the first git-status poll lands — otherwise the
+// task render paints committedCount (e.g. 11) a beat before the real upstream
+// ahead-count (e.g. 30) arrives, and the number visibly jumps.
 function drawEnd(){const b=E("endbtn");if(!b)return
- const n=shipCount();b.innerHTML='↥ End &amp; push'+(n>0?' '+n:'')}
+ const n=gitLoaded?shipCount():0;b.innerHTML='<span class=shiplbl>Ship</span>'+(n>0?'<span class=shipn>↥ '+n+'</span>':'')}
 // One CONFIRM that spells out EXACTLY what happens in plain words — this pushes
 // outward and tears the session down, so it must never fire by accident.
 function endSession(){const g=lastGit||{},n=shipCount()

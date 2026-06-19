@@ -6,10 +6,9 @@
 <link rel=stylesheet href="/web/app.css">
 <header><span class=brand><canvas id=gol width=10 height=10></canvas><b>MULTIPLEXER</b></span><span class=hdiv></span><span id=provider>__PROVIDER__</span><span id=repo></span><span class=sp></span><span id=branch class=branch></span>
  <button id=autobtn onclick="toggleAuto()" title="Auto mode: the executor runs DRAFT tasks in place and finished tasks are auto-approved — no status is rewritten, so toggling off restores every button">Auto mode: …</button>
- <button class=primary onclick="channel()">channel +</button>
- <button id=endbtn class=end onclick="endSession()" title="End the session: push this branch to its upstream, clear the committed tasks, return to the base branch, and stop the loop + this UI. Stopping the CLI instead (Ctrl-C / mux stop) ends WITHOUT pushing and can be resumed.">End &amp; push</button></header>
+ <button id=endbtn class=end onclick="endSession()" title="End the session: push this branch to its upstream, clear the committed tasks, return to the base branch, and stop the loop + this UI. Stopping the CLI instead (Ctrl-C / mux stop) ends WITHOUT pushing and can be resumed."><span class=shiplbl>Ship</span></button></header>
 <main>
- <section><h2 class=phead>Queue</h2><div id=tasks></div></section>
+ <section><div class=qhead><h2 class=phead>Queue</h2><button class="primary qadd" onclick="channel()" title="New channel">Task +</div><div id=tasks></div></section>
  <section><h2 class=phead>Output</h2><div id=working></div><pre id=log></pre></section>
 </main>
 <div id=backdrop onclick="closePlan()"></div>

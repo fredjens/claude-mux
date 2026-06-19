@@ -1,7 +1,7 @@
  body{margin:0;font:14px/1.5 ui-monospace,Menlo,monospace;background:var(--mux-bg);color:var(--mux-text)}
  header{padding:10px 16px;background:var(--mux-bg);border-bottom:1px solid var(--mux-border);display:flex;gap:12px;align-items:center}
  header b{color:#ffffff;font-weight:600;font-family:var(--mux-sans)} header .sp{flex:1} button{font-family:var(--mux-sans);font-size:12px;cursor:pointer;border:1px solid var(--mux-border);
-  background:transparent;color:var(--mux-text-dim);border-radius:3px;padding:2px 8px} button:hover{border-color:var(--accent);color:var(--mux-text)}
+  background:transparent;color:var(--mux-text-dim);border-radius:2px;padding:2px 8px} button:hover{border-color:var(--accent);color:var(--mux-text)}
  /* Brand lockup: GoL mark + wordmark are one unit, spaced tight (7px) so they
     cohere as a logo. The header's 12px gap then separates the lockup from the
     .hdiv hairline and the provider/repo metadata that follows. */
@@ -16,6 +16,8 @@
  .branch .branch-behind{color:var(--mux-text-muted);font-weight:600;margin-left:1px}
  .branch .branch-sub{color:var(--mux-text-muted)}
  .branch .branch-dirty{color:var(--mux-code-accent);font-weight:600;margin-left:1px}
+ .branch .branch-ins{color:#aed99a}
+ .branch .branch-del{color:#e8a0ac}
  main{display:grid;grid-template-columns:40% 1fr;height:calc(100vh - 49px)}
  /* Narrow viewport: stack Queue above Output and let the page scroll
     instead of squeezing two columns. Drop the fixed viewport height so the
@@ -25,7 +27,16 @@
   section{min-height:50vh}
  }
  section{background:var(--mux-bg);overflow:auto;padding:12px 16px} section+section{border-left:1px solid var(--mux-border)} .t{padding:7px 0;border-bottom:1px solid var(--mux-border-faint)}
- .phead{margin:0 0 10px;padding:0 0 6px;font-family:var(--mux-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--mux-text-muted);border-bottom:1px solid var(--mux-border)}
+ /* Both section headers reserve the same row height (--phead-h) so the Queue
+    underline — whose row also holds the + button — lines up with the Output
+    underline that has only the heading. */
+ .phead{display:flex;align-items:center;min-height:var(--phead-h,22px);margin:0 0 10px;padding:0 0 6px;font-family:var(--mux-sans);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--mux-text-muted);border-bottom:1px solid var(--mux-border)}
+ /* Queue header row: heading on the left, compact + button on the right. The
+    panel underline lives on .qhead so it spans the full width across both,
+    while the inner .phead drops its own border/spacing inside this row. */
+ .qhead{display:flex;align-items:center;justify-content:space-between;min-height:var(--phead-h,22px);margin:0 0 10px;padding:0 0 6px;border-bottom:1px solid var(--mux-border)}
+ .qhead .phead{min-height:0;margin:0;padding:0;border-bottom:0}
+ button.qadd{display:inline-flex;align-items:center;padding:2px 9px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;line-height:1.4}
  .t .st{font-size:11px;letter-spacing:.04em;text-transform:lowercase;color:var(--mux-text-muted)}
  .RUNNING{color:var(--accent)}.FAILED{color:var(--danger)}.BLOCKED{color:var(--danger)}
  .READY,.DONE,.DRAFT{color:var(--mux-text-muted)} .t .nm{color:var(--mux-text);margin:2px 0;cursor:pointer}
@@ -38,8 +49,14 @@
  /* End & push: the session-finalize button. Same solid-fill formula as
     button.ok so it speaks the system's affirmative-action language; it still
     stands out as the lone persistent solid-green button with a ↥ push glyph. */
- button.end{background:var(--ok);border-color:var(--ok);color:var(--mux-bg);font-weight:600}
+ button.end{display:inline-flex;align-items:stretch;gap:0;padding:1px;background:var(--ok);border-color:var(--ok);color:var(--mux-bg);font-weight:600}
  button.end:hover{filter:brightness(1.12);color:var(--mux-bg)}
+ button.end .shiplbl{display:inline-flex;align-items:center;padding:1px 7px 2px}
+ /* The ↥ push glyph + commits-to-ship count sit in a squared-off block that fills
+    the button's right end with a 1px inset. A specific saturated dark green
+    (#3f7a3a) with white text — a translucent black darken over the light sage
+    --ok (#aed99a) just read as gray, so the green is pinned explicitly. */
+ button.end .shipn{display:inline-flex;align-items:center;justify-content:center;gap:3px;background:#3f7a3a;color:#fff;border-radius:2px;padding:0 6px;font-size:11px;line-height:1.4;font-weight:400}
  button.primary{background:var(--accent);border-color:var(--accent);color:var(--mux-bg);font-weight:600}
  button.primary:hover{filter:brightness(1.12);color:var(--mux-bg)}
  button.ok{background:var(--ok);border-color:var(--ok);color:var(--mux-bg);font-weight:600}
@@ -85,11 +102,11 @@
  #drawer .dhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border-bottom:1px solid var(--mux-border);background:var(--mux-panel)}
  /* Segmented control: a single inset pill holding the three view tabs; the
     active tab fills/brightens, inactive ones stay muted. */
- #drawer .dtabs{display:inline-flex;gap:2px;background:var(--mux-bg);border:1px solid var(--mux-border-strong);border-radius:7px;padding:2px}
- #drawer .dtab{font-family:var(--mux-sans);font-size:12px;line-height:1.4;cursor:pointer;border:0;background:transparent;color:var(--mux-text-muted);border-radius:5px;padding:2px 12px}
+ #drawer .dtabs{display:inline-flex;gap:2px;background:var(--mux-bg);border:1px solid var(--mux-border-strong);border-radius:2px;padding:2px}
+ #drawer .dtab{font-family:var(--mux-sans);font-size:12px;line-height:1.4;cursor:pointer;border:0;background:transparent;color:var(--mux-text-muted);border-radius:2px;padding:2px 12px}
  #drawer .dtab:hover{color:var(--mux-text)}
  #drawer .dtab.active{background:var(--mux-chip);color:var(--mux-text-strong);box-shadow:inset 0 0 0 1px var(--accent)}
- #drawer .dclose{font-family:var(--mux-sans);font-size:12px;cursor:pointer;border:1px solid var(--mux-border-strong);background:var(--mux-chip);color:var(--mux-text);border-radius:6px;padding:2px 8px;line-height:1.4}
+ #drawer .dclose{font-family:var(--mux-sans);font-size:12px;cursor:pointer;border:1px solid var(--mux-border-strong);background:var(--mux-chip);color:var(--mux-text);border-radius:2px;padding:2px 8px;line-height:1.4}
  #drawer .dclose:hover{border-color:var(--accent)}
  /* The three views stack in the same box; only .active is shown, so flipping
     tabs is a visibility toggle (each iframe stays mounted, scroll preserved). */
