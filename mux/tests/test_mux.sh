@@ -585,6 +585,45 @@ STUB
   wait "$tickrun" 2>/dev/null
 }
 
+# ==========================================================================
+header "mux start — branch selection (the session front door)"
+# ==========================================================================
+# MUX_START_DRYRUN=1 makes cmd_web do ONLY branch selection then return, so we
+# can assert the create-or-checkout effects without launching the loop/server.
+# Stdin is not a tty under the test harness, so the fresh-start prompt is auto-
+# skipped (continues silently) — these tests cover the non-interactive paths.
+test_start_branch() {
+  local d; d="$(setup_repo)"
+  local base; base="$( cd "$d" && git branch --show-current )"
+
+  # mux start <newbranch> → creates it, switches, records the base.
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start newfeat 2>&1 )"; RC=$?
+  assert_zero "start <newbranch> exits 0"
+  assert_contains "start <newbranch> reports creation" "$OUT" "created branch newfeat"
+  assert_eq "switched to the new branch" "$( cd "$d" && git branch --show-current )" "newfeat"
+  assert_file_contains "records the forked-from base" "$base" "$d/.mux/base"
+
+  # On the feature branch with an unpushed commit, a no-arg start CONTINUES.
+  ( cd "$d" && echo x > f.txt && git add f.txt && git commit -qm work )
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 2>&1 )"; RC=$?
+  assert_contains "in-flight (unpushed) start continues silently" "$OUT" "continuing on newfeat"
+  assert_eq "stayed on the feature branch" "$( cd "$d" && git branch --show-current )" "newfeat"
+
+  # A numeric first arg is still the PORT, never a branch name.
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 9999 2>&1 )"; RC=$?
+  assert_zero "start <port> (numeric) exits 0"
+  assert_eq "numeric arg did not create a branch" "$( cd "$d" && git branch --show-current )" "newfeat"
+
+  # mux start <existing> checks it out (back to base).
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start "$base" 2>&1 )"; RC=$?
+  assert_zero "start <existing> exits 0"
+  assert_eq "checked out the existing branch" "$( cd "$d" && git branch --show-current )" "$base"
+
+  # An invalid branch name is rejected.
+  OUT="$( cd "$d" && MUX_START_DRYRUN=1 MUX_NO_OPEN=1 bash "$MUX" start 'bad..name' 2>&1 )"; RC=$?
+  assert_nonzero "start rejects an invalid branch name"
+}
+
 # --- run -------------------------------------------------------------------
 test_add
 test_task_channel
@@ -607,6 +646,7 @@ test_status_json
 test_resolve_id
 test_stop_kills_tick
 test_interrupted_marker
+test_start_branch
 
 printf '\n\033[1m──────────────────────────────────────────\033[0m\n'
 printf '\033[1mTotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

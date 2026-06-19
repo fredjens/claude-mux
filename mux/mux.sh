@@ -10,8 +10,14 @@
 # validated edits to those files; git (committing on `ok`) is the output's job.
 #
 #   mux channel  [name]         open a channel (reads repo, writes only .mux/)
-#   mux start    [port]         open the web view + auto-start the output (default :8770)
-#   mux web      [port]         alias of `mux start`
+#   mux start    [branch] [port]  open a session: pick/create the branch, then
+#                               the web view + output loop (default :8770). With
+#                               no args on a fresh start (clean tree, all pushed,
+#                               nothing RUNNING) it PROMPTS for the branch; with
+#                               in-flight work it silently continues. `mux start
+#                               <branch>` is non-interactive; `--new` forces the
+#                               prompt; a numeric first arg is still the port.
+#   mux web      [branch] [port]  alias of `mux start`
 #   mux stop                    stop this repo's web UI + output loop
 #   mux output [interval]     headless output loop on its own (web starts this for you)
 #   mux tick                    run ONE headless cycle (for launchd/cron)
@@ -699,8 +705,151 @@ cmd_stop() {
   [ "$stopped" -eq 1 ] || echo "nothing to stop"
 }
 
+# Record the branch THIS session forked from, so `mux end` knows where to return
+# (resolve_base reads it). One line under .mux/ — coordinated with cmd_end.
+record_base() { mkdir -p .mux; printf '%s\n' "$1" > .mux/base; }
+
+# Is there in-flight work that means a fresh `mux start` should silently CONTINUE
+# on the current branch rather than pop the branch-choice prompt? True (0) when
+# ANY of these hold — the ONLY three signals (DRAFT/READY tasks never count):
+#   1. uncommitted changes outside .mux (dirty tree, via git_clean), or
+#   2. unpushed commits — ahead of upstream if one is set, else commits on HEAD
+#      not contained in the base/default branch, or
+#   3. a task is currently RUNNING.
+# False (1) only on a clean, fully-pushed, nothing-RUNNING slate (a fresh start),
+# regardless of which branch you are on.
+session_in_flight() {
+  git_clean || return 0                                   # (1) dirty tree
+  local f
+  for f in "$TASKS"/*.task.md; do                         # (3) RUNNING task
+    [ "$(task_status "$f")" = RUNNING ] && return 0
+  done
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local ahead; ahead="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    [ "${ahead:-0}" -gt 0 ] && return 0                   # (2a) ahead of upstream
+  else
+    local base ref="" cand; base="$(resolve_base)"
+    for cand in "$base" "origin/$base"; do
+      git rev-parse --verify --quiet "$cand" >/dev/null 2>&1 && { ref="$cand"; break; }
+    done
+    if [ -n "$ref" ]; then
+      local n; n="$(git rev-list --count "$ref..HEAD" 2>/dev/null || echo 0)"
+      [ "${n:-0}" -gt 0 ] && return 0                      # (2b) unmerged into base
+    fi
+  fi
+  return 1
+}
+
+# Non-interactive `mux start <branch>`: create-or-checkout the named branch.
+start_checkout() {
+  local name="$1" current; current="$(git branch --show-current 2>/dev/null || true)"
+  [ "$name" = "$current" ] && { echo "▶ continuing on $current"; return; }
+  if git show-ref --verify --quiet "refs/heads/$name"; then
+    git checkout "$name" || die "could not checkout $name"
+    echo "▶ on existing branch $name"
+  else
+    git check-ref-format "refs/heads/$name" >/dev/null 2>&1 || die "invalid branch name: $name"
+    git checkout -b "$name" || die "could not create branch $name (off ${current:-HEAD})"
+    record_base "$current"
+    echo "✚ created branch $name (off ${current:-HEAD}) — session will commit here"
+  fi
+}
+
+# Create (or continue) a NEW branch from the interactive prompt.
+start_new_branch() {
+  local nm="$1" base="$2"
+  git check-ref-format "refs/heads/$nm" >/dev/null 2>&1 || die "invalid branch name: $nm"
+  if git show-ref --verify --quiet "refs/heads/$nm"; then
+    printf "branch '%s' already exists — continue on it instead? [Y/n] " "$nm"
+    local a; IFS= read -r a || a=""
+    case "$a" in [Nn]*) die "aborted — '$nm' exists; re-run mux start to choose again" ;; esac
+    git checkout "$nm" || die "could not checkout $nm"
+    echo "▶ on existing branch $nm"
+  else
+    git checkout -b "$nm" || die "could not create branch $nm"
+    record_base "$base"
+    echo "✚ created branch $nm (off $base) — session will commit here"
+  fi
+}
+
+# Pick an EXISTING local branch from a numbered list (interactive prompt).
+start_pick_existing() {
+  local current; current="$(git branch --show-current 2>/dev/null || true)"
+  local -a brs=(); local b
+  while IFS= read -r b; do brs+=("$b"); done \
+    < <(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
+  [ ${#brs[@]} -gt 0 ] || die "no local branches found"
+  echo "existing branches:"
+  local i=1
+  for b in "${brs[@]}"; do
+    if [ "$b" = "$current" ]; then printf "  %2d) %s  (current)\n" "$i" "$b"
+    else printf "  %2d) %s\n" "$i" "$b"; fi
+    i=$((i+1))
+  done
+  printf "number> "
+  local n; IFS= read -r n || n=""
+  case "$n" in ''|*[!0-9]*) die "not a number — aborted" ;; esac
+  { [ "$n" -ge 1 ] && [ "$n" -le ${#brs[@]} ]; } || die "out of range — aborted"
+  local pick="${brs[$((n-1))]}"
+  if [ "$pick" = "$current" ]; then echo "▶ continuing on $pick"
+  else git checkout "$pick" || die "could not checkout $pick"; echo "▶ on branch $pick"; fi
+}
+
+# The fresh-start branch prompt. Shown ONLY on a genuinely fresh start (clean
+# tree, everything pushed, nothing RUNNING). Pressing Enter continues on the
+# current branch with zero friction; otherwise create a new branch or pick one.
+start_prompt() {
+  local current; current="$(git branch --show-current 2>/dev/null || echo '?')"
+  echo
+  echo "┌─ mux start ─ choose the branch for THIS session ──────────────"
+  echo "│ Everything you commit this session lands on the branch you pick."
+  echo "│"
+  echo "│   [Enter]      continue on current branch  →  $current"
+  echo "│   n <name>     create a NEW branch (off $current) and switch to it"
+  echo "│   e            choose an EXISTING branch"
+  echo "└───────────────────────────────────────────────────────────────"
+  printf "branch> "
+  local reply; IFS= read -r reply || reply=""
+  reply="${reply#"${reply%%[![:space:]]*}"}"          # left-trim
+  case "$reply" in
+    '')          echo "▶ continuing on $current" ;;
+    n|new)
+      printf "new branch name> "; local nm; IFS= read -r nm || nm=""
+      nm="$(printf '%s' "$nm" | tr -d '[:space:]')"
+      [ -n "$nm" ] || die "no branch name given — aborted"
+      start_new_branch "$nm" "$current" ;;
+    n\ *|new\ *)
+      local nm="${reply#* }"; nm="$(printf '%s' "$nm" | tr -d '[:space:]')"
+      [ -n "$nm" ] || die "no branch name given — aborted"
+      start_new_branch "$nm" "$current" ;;
+    e|existing)  start_pick_existing ;;
+    *)           die "unrecognized choice '$reply' — press Enter, or use:  n <name> | e" ;;
+  esac
+}
+
 cmd_web() {
   command -v python3 >/dev/null 2>&1 || die "mux web needs python3"
+
+  # --- branch selection (the front door to a session) --------------------
+  # Parse the leading args: an optional `--new` forces the prompt; the first
+  # positional is a BRANCH name unless it's purely numeric (back-compat: the
+  # historical `mux web <port>` / `mux start <port>` still works).
+  local force_new="" branch_arg=""
+  if [ "${1:-}" = "--new" ]; then force_new=1; shift; fi
+  if [ -n "${1:-}" ]; then
+    case "$1" in *[!0-9]*) branch_arg="$1"; shift ;; esac
+  fi
+  if [ -n "$branch_arg" ]; then
+    start_checkout "$branch_arg"                          # mux start <branch> [port]
+  elif [ -t 0 ] && { [ -n "$force_new" ] || ! session_in_flight; }; then
+    start_prompt                                          # fresh start → choose a branch
+  else
+    local cur; cur="$(git branch --show-current 2>/dev/null || true)"
+    [ -n "$cur" ] && echo "▶ continuing on $cur"          # in-flight → zero-friction resume
+  fi
+  # A dry-run hook (tests): stop after branch selection, before the UI/loop.
+  [ -n "${MUX_START_DRYRUN:-}" ] && return 0
+
   local port="${1:-8770}"   # NOT 7000 — macOS AirPlay Receiver squats on 7000
   mkdir -p .mux/log .mux/run
   cmd_stop >/dev/null 2>&1                 # clean up any previous mux web for this repo
