@@ -139,7 +139,7 @@ function buttons(t){const b=[],f=t.file
  return `<div class=acts>${b.join("")}</div>`}
 async function refresh(){
  const ts=await (await fetch("/api/tasks")).json()
- const rank=s=>s=="DONE"?1:0; ts.sort((a,b)=>rank(a.status)-rank(b.status))
+ const order={RUNNING:0,BLOCKED:1,READY:2,DRAFT:3,DONE:4,COMMITTED:4,FAILED:5}; const rank=s=>order[s]??3; ts.sort((a,b)=>rank(a.status)-rank(b.status))
  E("tasks").innerHTML=ts.map(t=>`<div class=t><div class="st ${t.status}">${t.status}`+
   `${t.next?" ·next":""}${t.awaiting_answer?" ·awaiting you":""}`+
   `${t.dep_status=="pending"?" ·blocked by dep":""}</div>`+
