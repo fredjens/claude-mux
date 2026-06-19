@@ -469,8 +469,11 @@ def spawn_direct(task_file):
     prompt = (f"Read .mux/tasks/{name}. This is a DRAFT mux task — help me "
               f"refine and shape it (its Goal/Details), don't start working on "
               f"it yet. {name} is the task we're editing.")
-    cmd = (f'cd {json.dumps(REPO)} && claude --permission-mode plan {json.dumps(prompt)}'
-           .replace('"', '\\"'))
+    # ensure_ascii=False keeps non-ASCII (e.g. the em-dash in `prompt`) as literal
+    # UTF-8; the default would emit a `—` escape, which AppleScript can't parse
+    # ("Expected \" but found unknown token") once embedded in the `do script` string.
+    cmd = (f'cd {json.dumps(REPO)} && claude --permission-mode plan '
+           f'{json.dumps(prompt, ensure_ascii=False)}').replace('"', '\\"')
     script = (
         'tell application "Terminal"\n'
         '  activate\n'
