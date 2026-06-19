@@ -175,7 +175,10 @@ async function refresh(){
   // <canvas> fallback content so a cycle boundary is never invisible).
   if(isMark(l)&&(lg.length-1-ri)===newestIdx)
    return `<div class="l golmarkwrap"><canvas id=golmark class=golmark width=${MARK.cols} height=${MARK.rows}>${esc(l)}</canvas></div>`
-  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","▶":"lk"}[l[0]]||"lx";return `<div class="l ${c}">${esc(l)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div class='empty'>Idle — waiting for a READY task</div>")
+  // U+001F (Unit Separator) prefixes the new-cycle kickoff phrase: it keys the
+  // divider class `lk` and is stripped so it never renders as a literal char.
+  const c={"●":"la","→":"lt","✓":"lr","─":"ls","⌖":"lg","✗":"le","Σ":"lm","\x1f":"lk"}[l[0]]||"lx"
+  const txt=c=="lk"?l.slice(1):l;return `<div class="l ${c}">${esc(txt)}</div>`}).join("")||((ts.some(t=>t.executing)||E("working").innerHTML)?"":"<div class='empty'>Idle — waiting for a READY task</div>")
  // Animate exactly once per brand-new cycle (strict count increase); on the
  // first sight and on every other poll just repaint the frozen frame so the 2s
  // full re-render of #log never restarts or flickers the animation.

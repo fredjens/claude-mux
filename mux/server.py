@@ -249,13 +249,15 @@ _CYCLE_PHRASES = [
 
 
 def cycle_divider(gen):
-    """Return the kickoff banner for a new cycle: a single bright "▶"-led log
-    item carrying one of the themed phrases. `gen` (the 0-based cycle index)
-    picks the phrase deterministically — no randomness — but a stride coprime
-    with the pool length (7 vs 12) walks the whole list so consecutive runs
-    jump around and feel random. The leading "▶" makes the UI style it as its
-    own bright divider line (class `lk`)."""
-    return ["▶ " + _CYCLE_PHRASES[(max(0, gen) * 7) % len(_CYCLE_PHRASES)]]
+    """Return the kickoff banner for a new cycle: a single log item carrying one
+    of the themed phrases, rendered by the UI as a horizontal divider with the
+    phrase sitting on the rule. `gen` (the 0-based cycle index) picks the phrase
+    deterministically — no randomness — but a stride coprime with the pool
+    length (7 vs 12) walks the whole list so consecutive runs jump around and
+    feel random. The line is prefixed with a non-printing sentinel (U+001F, the
+    Unit Separator) so the UI can key off `l[0]` to apply the divider class
+    (`lk`) and strip the sentinel before display — the user never sees a glyph."""
+    return ["\x1f" + _CYCLE_PHRASES[(max(0, gen) * 7) % len(_CYCLE_PHRASES)]]
 
 
 def log_lines(limit=300):

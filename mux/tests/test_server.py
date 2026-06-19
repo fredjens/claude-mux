@@ -167,9 +167,10 @@ class LogLinesTest(unittest.TestCase):
             for ev in events:
                 f.write(json.dumps(ev) + "\n")
         lines = server.log_lines()
-        # The init event draws a bright "▶"-led phrase divider (own style
-        # class), with no "cycle N" text and no GOL grid block.
-        self.assertTrue(any(isinstance(l, str) and l.startswith("▶")
+        # The init event draws a kickoff phrase divider, prefixed with the
+        # non-printing U+001F sentinel (the UI keys the divider class off it
+        # and strips it), with no "cycle N" text and no GOL grid block.
+        self.assertTrue(any(isinstance(l, str) and l.startswith("\x1f")
                             for l in lines))
         self.assertFalse(any(isinstance(l, str) and "█" in l for l in lines))
         self.assertFalse(any(isinstance(l, str) and "cycle" in l for l in lines))

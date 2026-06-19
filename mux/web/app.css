@@ -61,7 +61,10 @@
  #log .md code{background:var(--mux-chip);padding:1px 4px;border-radius:3px;font-size:12px}
  #log .md pre{background:var(--mux-chip);padding:8px;border-radius:4px;overflow:auto;white-space:pre} #log .md pre code{background:none;padding:0}
  #log .md a{color:var(--accent)} #log .md blockquote{margin:4px 0;padding-left:10px;border-left:2px solid var(--mux-border-strong);color:var(--mux-text-dim)}
- .la{color:var(--mux-text-bright)} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:var(--mux-divider);margin:8px 0;line-height:1.15} .lx{color:var(--mux-text-dim)} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)} .lk{color:var(--accent);font-weight:600;margin-top:10px}
+ .la{color:var(--mux-text-bright)} .lt{color:#d99bb5} .lr{color:var(--ok)} .ls{color:var(--mux-divider);margin:8px 0;line-height:1.15} .lx{color:var(--mux-text-dim)} .lg{color:var(--sub)} .le{color:var(--danger)} .lm{color:var(--ok)} /* New-cycle kickoff phrase: a horizontal divider with the phrase centered on
+    the rule (thin lines flank it), matching the log's "─" divider color. */
+ .lk{color:var(--accent);font-weight:600;margin:10px 0;display:flex;align-items:center;gap:10px;white-space:normal}
+ .lk::before,.lk::after{content:"";flex:1;height:1px;background:var(--mux-divider)}
  .empty{color:var(--mux-text-muted);font-size:12.5px}
  #backdrop{position:fixed;inset:0;background:var(--mux-backdrop);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40}
  #drawer{position:fixed;top:0;right:0;height:100vh;width:min(720px,92vw);background:var(--mux-bg);border-left:1px solid var(--mux-border);
