@@ -812,6 +812,9 @@ def reviewmap_page(name):
     if text in ("(invalid task)", "(task not found)"):
         return _reviewmap_page("review", "", "", text)
     slug = os.path.basename(name).replace(".task.md", "")
+    taskfile = os.path.basename(name)   # full <…>.task.md — used for round-trip
+                                        # links so the file view's "‹ Review"
+                                        # back-link resolves (read_task needs it)
     title = _task_field(text, "Task") or slug
     ok, out = mux("review-map", slug)
     try:
@@ -829,7 +832,7 @@ def reviewmap_page(name):
     def entry(it, with_role):
         path = it.get("path", "")
         note = it.get("note", "")
-        href = f"/file?path={urllib.parse.quote(path)}&task={urllib.parse.quote(slug)}"
+        href = f"/file?path={urllib.parse.quote(path)}&task={urllib.parse.quote(taskfile)}"
         role = (it.get("role") or "").lower()
         badge = ""
         if with_role:

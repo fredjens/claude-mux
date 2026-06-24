@@ -506,9 +506,10 @@ class ReviewMapPageTest(unittest.TestCase):
         self.assertIn(">core<", html)            # role badge
         self.assertIn(">consequence<", html)
         self.assertIn("Read for context", html)
-        # entries link into /file with the task slug for the back-link
-        self.assertIn("/file?path=core.py&amp;task=t", html)
-        self.assertIn("/file?path=iface.py&amp;task=t", html)
+        # entries link into /file with the FULL task filename, so the file
+        # view's "‹ Review" back-link round-trips (read_task needs .task.md)
+        self.assertIn("/file?path=core.py&amp;task=t.task.md", html)
+        self.assertIn("/file?path=iface.py&amp;task=t.task.md", html)
 
     def test_non_running_task_has_no_map(self):
         server.mux = lambda *a: (True, json.dumps(
