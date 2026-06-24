@@ -1184,9 +1184,20 @@ start_status_loop() {
     opid="$(cat .mux/run/output.pid 2>/dev/null || true)"
     if [ -n "$opid" ] && kill -0 "$opid" 2>/dev/null; then alive="up"; else alive="down"; fi
     now="$(date +%s)"; el=$((now-start)); mm=$((el/60)); ss=$((el%60))
-    printf '\r%s%s  mux ⟳ %02d:%02d  ·  %s  ·  tasks D%d R%d ▶%d ✓%d  ·  output %s%s' \
+    # A tick is in flight exactly when .mux/tick.lock exists (same signal the
+    # web server uses); show a live MM:SS from the lock dir's mtime so a
+    # grinding worker no longer looks frozen on a stuck task tally.
+    local exec_seg=""
+    if [ -d .mux/tick.lock ]; then
+      local lstart tmm tss
+      lstart="$(stat -f %m .mux/tick.lock 2>/dev/null || stat -c %Y .mux/tick.lock 2>/dev/null || echo "$now")"
+      local tel=$((now-lstart)); [ "$tel" -lt 0 ] && tel=0
+      tmm=$((tel/60)); tss=$((tel%60))
+      exec_seg="$(printf '  ·  %s▶ executing %02d:%02d%s' "$C_ACC" "$tmm" "$tss" "$C_DIM")"
+    fi
+    printf '\r%s%s  mux ⟳ %02d:%02d  ·  %s  ·  tasks D%d R%d ▶%d ✓%d  ·  output %s%s%s' \
       "$(tput el 2>/dev/null || true)" "$C_DIM" "$mm" "$ss" "$cur" \
-      "$draft" "$ready" "$running" "$committed" "$alive" "$C_RST"
+      "$draft" "$ready" "$running" "$committed" "$alive" "$exec_seg" "$C_RST"
     sleep 3
   done
   printf '\r%s' "$(tput el 2>/dev/null || true)"
