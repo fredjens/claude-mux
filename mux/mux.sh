@@ -1245,18 +1245,9 @@ cmd_web() {
     echo "  (Ctrl-C or closing this window stops UI + output; or run: mux stop)"
   fi
   # Pop the browser once the server is listening, unless told not to (MUX_NO_OPEN=1).
-  # On a TTY, ASK first — defaulting to NO: only an explicit "y" opens it; a 10s
-  # no-answer (or anything else) declines. The prompt erases itself once resolved.
   local do_open=1
   if [ -n "${MUX_NO_OPEN:-}" ]; then
     do_open=""
-  elif [ -t 0 ] && [ -t 1 ]; then
-    local _wht _rst; _rst="$(tput sgr0 2>/dev/null || true)"
-    _wht="$(tput setaf 15 2>/dev/null || true)"; [ -z "$_wht" ] && _wht="$(tput bold 2>/dev/null || true)"
-    printf '%s  open the browser? [y/N] (auto-no in 10s) %s' "$_wht" "$_rst"
-    local ans=""; IFS= read -rt 10 -n 1 ans 2>/dev/null || ans=""
-    printf '\r%s\r' "$(tput el 2>/dev/null || true)"     # erase the prompt line
-    case "$ans" in [Yy]) do_open=1 ;; *) do_open="" ;; esac
   fi
   if [ -n "$do_open" ]; then
     local opener=""; command -v open >/dev/null 2>&1 && opener=open || { command -v xdg-open >/dev/null 2>&1 && opener=xdg-open; }
