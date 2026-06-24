@@ -562,10 +562,12 @@ cmd_review_map() {
     --setting-sources user --permission-mode default \
     --allowedTools 'Read' 'Glob' 'Grep' > "$rawf" 2>/dev/null || true
   # Normalize the model's output into strict, schema-shaped JSON and stamp the
-  # diff_hash (the cache key). A parse failure writes a graceful "unavailable"
-  # map rather than corrupt JSON, so the UI always has something to render.
+  # diff_hash (the cache key). A parse failure emits a graceful "unavailable"
+  # map (so the UI always has something to render) but is NOT cached — only a
+  # successful map is written to $out, so a failure (e.g. a transient API error
+  # during generation) retries on the next request instead of being stuck.
   python3 - "$hash" "$st" "$out" "$rawf" <<'PY'
-import sys, json, re
+import sys, json, re, os
 hash_, st, out, rawf = sys.argv[1:5]
 try:
     raw = open(rawf, encoding="utf-8", errors="replace").read()
@@ -590,10 +592,15 @@ else:
     doc = {"status": st, "diff_hash": hash_,
            "summary": "(review map unavailable — could not parse model output)",
            "spine": [], "context": [], "generated": False}
-open(out, "w").write(json.dumps(doc, indent=1))
+payload = json.dumps(doc, indent=1)
+print(payload)                       # emit for THIS request regardless of outcome
+if doc["generated"]:                 # cache ONLY a real map, so failures retry
+    open(out, "w").write(payload)
+else:                                # never let a failed map linger as a cache hit
+    try: os.remove(out)
+    except OSError: pass
 PY
   rm -f "$dfile" "$rawf"
-  cat "$out"
 }
 
 cmd_status() {
