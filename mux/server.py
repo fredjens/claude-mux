@@ -730,6 +730,161 @@ def diff_page(name):
     return _diff_page(title, chips, "\n".join(blocks), "(no changes)")
 
 
+def file_page(path, back_task=""):
+    """Read-only view of ANY repo file (not just changed ones) in the diff theme,
+    with line numbers — the "go read that other file for context" surface that lets
+    a reviewer stay in the dashboard instead of reaching for an editor. `path` is
+    repo-relative; it is confined to REPO (normpath collapses any ../, and the
+    .git dir is never served), and the body is capped so a huge/binary file can't
+    blow up the page. `back_task` (a task slug), when set, renders a "‹ Review"
+    link back to that task's review map, so the Review tab is a self-contained
+    mini-browser. Never errors: a bad path renders a graceful empty state."""
+    rel = (path or "").lstrip("/")
+    full = os.path.normpath(os.path.join(REPO, rel))
+    inside = full == REPO or full.startswith(REPO + os.sep)
+    is_git = rel == ".git" or rel.startswith(".git/") or rel.startswith(".git" + os.sep)
+    if not rel or not inside or is_git:
+        return _file_page("file", rel or "(no path)", "", "(file not available)", back_task)
+    try:
+        with open(full, "r", errors="replace") as fh:
+            content = fh.read(512 * 1024)
+    except (OSError, IsADirectoryError):
+        return _file_page("file", rel, "", "(not a readable file)", back_task)
+    if "\x00" in content:
+        return _file_page("file", rel, "", "(binary file)", back_task)
+    lines = content.split("\n")
+    CAP = 4000
+    truncated = len(lines) > CAP
+    rows = []
+    for i, ln in enumerate(lines[:CAP], 1):
+        rows.append(f'<span class=fl><span class=fn>{i}</span>'
+                    f'<span class=fc>{escape(ln) or "&nbsp;"}</span></span>')
+    if truncated:
+        rows.append(f'<span class=fl><span class=fn></span>'
+                    f'<span class=fc>… ({len(lines) - CAP} more lines)</span></span>')
+    title = os.path.basename(rel)
+    return _file_page(title, rel, "".join(rows), "(empty file)", back_task)
+
+
+def _file_page(title, relpath, body_html, empty_msg, back_task=""):
+    """Styled read-only file document — same dark theme as the diff view, with a
+    gutter of line numbers. `relpath` is shown as the meta chip; `back_task` adds
+    a "‹ Review" link back to that task's map."""
+    body = body_html or f'<span class=fl><span class=fn></span>' \
+                        f'<span class=fc>{escape(empty_msg)}</span></span>'
+    back = ""
+    if back_task:
+        href = "/reviewmap?file=" + escape(back_task)
+        back = f'<a class=back href="{href}">‹ Review</a>'
+    return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
+<link rel=stylesheet href="/web/theme.css">
+<style>body{{margin:0;background:var(--mux-bg);color:var(--mux-text)}}
+ ::selection{{background:var(--mux-select-bg);color:var(--mux-bright)}}
+ .wrap{{box-sizing:border-box;max-width:120ch;margin:0 auto;padding:40px 36px 96px;min-height:100vh}}
+ .back{{display:inline-block;font:12px/1 var(--mux-sans);color:var(--mux-text-muted);
+  text-decoration:none;margin-bottom:14px}}
+ .back:hover{{color:var(--mux-text-strong)}}
+ .title{{font:600 22px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:var(--mux-text-strong);
+  letter-spacing:-.01em}}
+ .meta{{font:11.5px/1.7 ui-monospace,Menlo,monospace;color:var(--mux-text-muted);margin:7px 0 18px;
+  padding-bottom:16px;border-bottom:1px solid var(--mux-border)}}
+ pre.file{{font:12.5px/1.55 ui-monospace,Menlo,monospace;background:var(--mux-panel);
+  border:1px solid var(--mux-border-faint);border-radius:8px;padding:14px 0;margin:0;
+  overflow:auto;white-space:pre;tab-size:4}}
+ .fl{{display:block}}
+ .fn{{display:inline-block;width:4ch;padding:0 16px 0 8px;text-align:right;color:var(--mux-text-dim);
+  user-select:none;-webkit-user-select:none}}
+ .fc{{color:var(--mux-text)}}</style>
+<div class=wrap>{back}<div class=title>{escape(title)}</div>
+<div class=meta>{escape(relpath)}</div>
+<pre class=file>{body}</pre></div>"""
+
+
+def reviewmap_page(name):
+    """The Review tab: a guided MAP of a task's change, not an alphabetized file
+    list. Shells `mux review-map <slug>` (which generates-and-caches the map via a
+    read-only headless claude, or returns the cache instantly), then renders the
+    one-line summary, the SPINE (changed files in reading order, core first, with
+    role badges + notes), and CONTEXT (unchanged files worth reading). Every entry
+    links into /file (with a back-link), so the reviewer can chase any file —
+    changed or not — without leaving the dashboard. Read-only."""
+    text = read_task(name)
+    if text in ("(invalid task)", "(task not found)"):
+        return _reviewmap_page("review", "", "", text)
+    slug = os.path.basename(name).replace(".task.md", "")
+    title = _task_field(text, "Task") or slug
+    ok, out = mux("review-map", slug)
+    try:
+        m = json.loads(out) if ok else {}
+    except json.JSONDecodeError:
+        m = {}
+    status = m.get("status") or _task_field(text, "STATUS") or "?"
+    if status not in ("RUNNING", "COMMITTED"):
+        return _reviewmap_page(title, slug, "",
+                               f"(no review map — only RUNNING or COMMITTED tasks have changes; this is {status})")
+    summary = (m.get("summary") or "").strip()
+    spine = m.get("spine") or []
+    context = m.get("context") or []
+
+    def entry(it, with_role):
+        path = it.get("path", "")
+        note = it.get("note", "")
+        href = f"/file?path={urllib.parse.quote(path)}&task={urllib.parse.quote(slug)}"
+        role = (it.get("role") or "").lower()
+        badge = ""
+        if with_role:
+            rc = "rcore" if role == "core" else "rcons"
+            label = "core" if role == "core" else "consequence"
+            badge = f'<span class="rbadge {rc}">{label}</span>'
+        return (f'<a class=rentry href="{escape(href)}">'
+                f'<span class=rpath>{escape(path)}</span>{badge}'
+                f'<span class=rnote>{escape(note)}</span></a>')
+
+    sections = ""
+    if spine:
+        sections += '<div class=rsec><div class=rlabel>The change, in reading order</div>'
+        sections += "".join(entry(it, True) for it in spine) + "</div>"
+    if context:
+        sections += '<div class=rsec><div class=rlabel>Read for context (unchanged)</div>'
+        sections += "".join(entry(it, False) for it in context) + "</div>"
+    if not m.get("generated", True) and not sections:
+        sections = '<div class=rempty>(could not build a map for this change)</div>'
+    return _reviewmap_page(title, slug, summary, "", sections)
+
+
+def _reviewmap_page(title, slug, summary, empty_msg, sections=""):
+    """Styled review-map document — same dark theme as the diff/file views."""
+    if empty_msg:
+        body = f'<div class=rempty>{escape(empty_msg)}</div>'
+    else:
+        sm = f'<div class=rsum>{escape(summary)}</div>' if summary else ""
+        body = sm + (sections or '<div class=rempty>(no changed files)</div>')
+    return f"""<!doctype html><meta charset=utf-8><title>{escape(title)}</title>
+<link rel=stylesheet href="/web/theme.css">
+<style>body{{margin:0;background:var(--mux-bg);color:var(--mux-text)}}
+ ::selection{{background:var(--mux-select-bg);color:var(--mux-bright)}}
+ .wrap{{box-sizing:border-box;max-width:90ch;margin:0 auto;padding:40px 36px 96px;min-height:100vh}}
+ .title{{font:600 22px/1.25 Georgia,"Iowan Old Style","Palatino",serif;color:var(--mux-text-strong);
+  letter-spacing:-.01em}}
+ .rsum{{font:15px/1.6 var(--mux-sans);color:var(--mux-text);margin:14px 0 26px;
+  padding-bottom:20px;border-bottom:1px solid var(--mux-border)}}
+ .rsec{{margin:0 0 28px}}
+ .rlabel{{font:11px/1.4 var(--mux-sans);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--mux-text-dim);margin:0 0 10px}}
+ .rentry{{display:block;text-decoration:none;padding:11px 14px;margin:0 0 7px;border-radius:8px;
+  background:var(--mux-panel);border:1px solid var(--mux-border-faint)}}
+ .rentry:hover{{border-color:var(--mux-border-strong);background:var(--mux-chip)}}
+ .rpath{{font:13px/1.5 ui-monospace,Menlo,monospace;color:var(--mux-text-strong);
+  border-bottom:1px solid var(--mux-border-strong)}}
+ .rbadge{{font:10px/1 var(--mux-sans);letter-spacing:.04em;text-transform:uppercase;
+  padding:3px 7px;border-radius:10px;margin-left:9px;vertical-align:1px}}
+ .rcore{{background:rgba(120,200,90,.16);color:#aed99a}}
+ .rcons{{background:var(--mux-chip);color:var(--mux-text-muted)}}
+ .rnote{{display:block;font:13px/1.5 var(--mux-sans);color:var(--mux-text-muted);margin-top:5px}}
+ .rempty{{font:14px/1.6 var(--mux-sans);color:var(--mux-text-muted);margin-top:18px}}</style>
+<div class=wrap><div class=title>{escape(title)}</div>{body}</div>"""
+
+
 def _output_session():
     """The claude session id the live tick log (output.jsonl) belongs to — the
     last `init` event's session_id. "" if absent/unreadable. Used to decide whether
@@ -972,6 +1127,13 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/output?"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, output_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
+        elif self.path.startswith("/file?"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, file_page(q.get("path", [""])[0], q.get("task", [""])[0]),
+                       "text/html; charset=utf-8")
+        elif self.path.startswith("/reviewmap?"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, reviewmap_page(q.get("file", [""])[0]), "text/html; charset=utf-8")
         elif self.path.startswith("/web/"):
             # Serve files under mux/web/ (e.g. vendor/marked.min.js), resolved
             # against WEB and confined to it — normpath collapses any ../ so a

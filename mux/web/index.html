@@ -14,13 +14,15 @@
 <div id=backdrop onclick="closePlan()"></div>
 <div id=drawer><div class=dhead><div class=dtabs role=tablist>
   <button class=dtab data-view=task onclick="showView('task')">Task</button>
-  <button class=dtab data-view=output onclick="showView('output')">Output</button>
+  <button class=dtab data-view=review onclick="showView('review')">Review</button>
   <button class=dtab data-view=diff onclick="showView('diff')">Diff</button>
+  <button class=dtab data-view=output onclick="showView('output')">Output</button>
  </div><button class=dclose onclick="closePlan()" title="close">×</button></div>
  <div class=dbody>
   <iframe class=dframe data-view=task></iframe>
-  <iframe class=dframe data-view=output></iframe>
+  <iframe class=dframe data-view=review></iframe>
   <iframe class=dframe data-view=diff></iframe>
+  <iframe class=dframe data-view=output></iframe>
  </div></div>
 <!-- Ship confirm: an in-app modal (replaces the native confirm) that lays out
      exactly what a push+end does — repo, branch→base, the commits/diffstat it

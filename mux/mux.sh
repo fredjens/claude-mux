@@ -28,6 +28,10 @@
 #   mux board                   interactive board (fzf): preview + verb keys
 #   mux next                    the one task the output should run now
 #   mux show     <id>           print a task file
+#   mux review-map <id>         print/cache a JSON "review map" of a task's change
+#                               (summary + changed files in reading order + context
+#                               files); built by a read-only headless claude, cached
+#                               by diff hash. The dashboard's Review tab renders it.
 #   mux release  <id>           DRAFT  -> READY   (you release it to run)
 #   mux unrelease <id>          READY  -> DRAFT   (regret it before it starts)
 #   mux claim    <id>           READY  -> RUNNING (output claims it; not for you)
@@ -503,6 +507,93 @@ $*"
 cmd_show() {
   [ $# -ge 1 ] || die "usage: mux show <id>"
   cat "$(resolve_id "$1")"
+}
+
+# The instruction a headless claude follows to produce a task's review map. $1 is
+# the path to a file holding the task's unified diff. Output is STRICT JSON only.
+review_map_prompt() {
+  cat <<PROMPT
+You are producing a concise REVIEW MAP for a code change, to help a human reviewer navigate it. The change's unified diff is in this file: $1 — read it first. You may Read/Glob/Grep any file in the repo for context. Do NOT edit anything.
+
+Output ONLY a single JSON object — no prose, no markdown, no code fences — with exactly this shape:
+{"summary":"<one sentence: what this change does and why>",
+ "spine":[{"path":"<changed file>","role":"core","note":"<one sentence: its part in the change>"}],
+ "context":[{"path":"<UNCHANGED file worth reading>","note":"<one sentence: why it helps understand the change>"}]}
+
+Rules:
+- "spine" lists the CHANGED files in the order a reviewer should read them: the file(s) carrying the heart of the change first with role "core", then files that changed only as a CONSEQUENCE with role "consequence".
+- "context" lists up to 4 files that are NOT in the diff but help a reviewer understand it — a caller, the interface being implemented, a config or prompt that explains intent. Use real repo-relative paths. Omit (empty array) if none apply.
+- Exactly one plain sentence per "note". No markdown. Emit the JSON object and nothing else.
+PROMPT
+}
+
+# Build (or reuse a cached) review map for a task and print it as JSON. The map is
+# the change's SHAPE — a one-line summary, the changed files in reading order
+# (spine; core first, then consequences), and unchanged files worth reading
+# (context). It is cached at .mux/review/<slug>.json keyed on a hash of the
+# CURRENT diff, so it regenerates only when the diff actually changes. Generated
+# by a headless, READ-ONLY claude (Read/Glob/Grep; subscription, not API key —
+# same env scrub as cmd_tick); the dashboard's Review tab renders it.
+cmd_review_map() {
+  [ $# -ge 1 ] || die "usage: mux review-map <id>"
+  local f slug st; f="$(resolve_id "$1")"; slug="${f##*/}"; slug="${slug%.task.md}"
+  st="$(task_status "$f")"
+  local diff=""
+  case "$st" in
+    COMMITTED) diff="$(git show --format= "$(task_commit "$f")" 2>/dev/null || true)" ;;
+    RUNNING)   diff="$(git diff HEAD -- . ':(exclude).mux' 2>/dev/null || true)" ;;
+    *) printf '{"status":"%s","summary":"","spine":[],"context":[],"generated":false}\n' "$st"; return 0 ;;
+  esac
+  if [ -z "${diff//[[:space:]]/}" ]; then
+    printf '{"status":"%s","summary":"(no changes yet)","spine":[],"context":[],"generated":true}\n' "$st"
+    return 0
+  fi
+  local hash; hash="$(printf '%s' "$diff" | shasum 2>/dev/null | awk '{print $1}')"
+  [ -n "$hash" ] || hash="$(printf '%s' "$diff" | cksum | tr -d ' ')"
+  mkdir -p .mux/review
+  local out=".mux/review/$slug.json"
+  # Cache hit: same diff as last time → return the stored map untouched.
+  if [ -f "$out" ] && grep -q "\"diff_hash\":[[:space:]]*\"$hash\"" "$out" 2>/dev/null; then
+    cat "$out"; return 0
+  fi
+  local dfile=".mux/review/$slug.diff" rawf=".mux/review/$slug.raw"
+  printf '%s\n' "$diff" > "$dfile"
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(review_map_prompt "$dfile")" \
+    --setting-sources user --permission-mode default \
+    --allowedTools 'Read' 'Glob' 'Grep' > "$rawf" 2>/dev/null || true
+  # Normalize the model's output into strict, schema-shaped JSON and stamp the
+  # diff_hash (the cache key). A parse failure writes a graceful "unavailable"
+  # map rather than corrupt JSON, so the UI always has something to render.
+  python3 - "$hash" "$st" "$out" "$rawf" <<'PY'
+import sys, json, re
+hash_, st, out, rawf = sys.argv[1:5]
+try:
+    raw = open(rawf, encoding="utf-8", errors="replace").read()
+except OSError:
+    raw = ""
+obj = None
+m = re.search(r"\{.*\}", raw, re.S)
+if m:
+    try: obj = json.loads(m.group(0))
+    except Exception: obj = None
+def items(x, keys):
+    out = []
+    for it in (x if isinstance(x, list) else []):
+        if isinstance(it, dict) and it.get("path"):
+            out.append({k: str(it.get(k, "")) for k in keys})
+    return out
+if isinstance(obj, dict):
+    doc = {"status": st, "diff_hash": hash_, "summary": str(obj.get("summary", "")),
+           "spine": items(obj.get("spine"), ("path", "role", "note")),
+           "context": items(obj.get("context"), ("path", "note")), "generated": True}
+else:
+    doc = {"status": st, "diff_hash": hash_,
+           "summary": "(review map unavailable — could not parse model output)",
+           "spine": [], "context": [], "generated": False}
+open(out, "w").write(json.dumps(doc, indent=1))
+PY
+  rm -f "$dfile" "$rawf"
+  cat "$out"
 }
 
 cmd_status() {
@@ -1167,6 +1258,7 @@ case "$cmd" in
   end)            cmd_end "$@" ;;
   changes)        cmd_changes "$@" ;;
   show)           cmd_show "$@" ;;
+  review-map|reviewmap) cmd_review_map "$@" ;;
   ls|status)      cmd_status "$@" ;;
   board)          cmd_board "$@" ;;
   next)           cmd_next "$@" ;;

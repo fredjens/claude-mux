@@ -4,8 +4,9 @@ const esc=s=>(""+s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])
 // (/plan), Output (/output), Diff (/diff). Each lives in its own iframe that's
 // loaded lazily on first activation and then kept mounted, so flipping tabs is
 // instant (no reload flash, scroll preserved) — switching just shows/hides.
-const VIEWS=["task","output","diff"]
+const VIEWS=["task","review","diff","output"]
 const VIEW_SRC={task:f=>'/plan?file='+encodeURIComponent(f),
+ review:f=>'/reviewmap?file='+encodeURIComponent(f),
  output:f=>'/output?file='+encodeURIComponent(f),
  diff:f=>'/diff?file='+encodeURIComponent(f)}
 let drawerFile=null
@@ -27,6 +28,9 @@ function openPlan(file){openTask(file,"task")}
 // Open the code diff for a task: the pending working-tree change for a RUNNING
 // task (review-before-approve), or the landed commit for a COMMITTED one.
 function openDiff(file){openTask(file,"diff")}
+// Open the guided review map (the change's spine + context files) for a task —
+// the primary review surface; the raw line diff is one tab over.
+function openReview(file){openTask(file,"review")}
 function closePlan(){document.body.classList.remove("drawer-open")
  VIEWS.forEach(x=>{const f=frameFor(x);if(f){f.src="about:blank";delete f.dataset.loaded}})
  drawerFile=null}
@@ -35,7 +39,7 @@ document.addEventListener("keydown",e=>{if(!document.body.classList.contains("dr
  const cur=VIEWS.findIndex(v=>frameFor(v)&&frameFor(v).classList.contains("active"))
  if(e.key=="ArrowRight"||e.key=="ArrowLeft"){if(cur<0)return
   const n=(cur+(e.key=="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;showView(VIEWS[n])}
- else if(e.key=="1"||e.key=="2"||e.key=="3")showView(VIEWS[+e.key-1])})
+ else if(e.key>="1"&&e.key<="4")showView(VIEWS[+e.key-1])})
 // Working indicator: server says executing/elapsed (polled in refresh); the
 // counter is driven client-side from a start time so it ticks every second
 // without hammering the server. work.start=null means no cycle in flight.
@@ -224,11 +228,14 @@ function buttons(t){const b=[],f=t.file
  if(t.status=="RUNNING"){
   if(t.executing)return ""
   if(!auto)b.push(`<button class=ok onclick="act('ok')">Approve</button>`)
-  // Review the pending working-tree change before approving — opens the diff in the drawer.
+  // Review the pending change before approving — the guided map (spine + context)
+  // is the primary surface; the raw line diff sits one tab over.
+  b.push(`<button onclick="openReview('${f}')">Review</button>`)
   b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
   b.push(`<button class=danger onclick="if(confirm('Discard this task\'s changes?'))act('revert')">revert</button>`)}
  // A landed task keeps a Diff affordance so you can re-check what it committed.
- if(t.status=="COMMITTED"){b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
+ if(t.status=="COMMITTED"){b.push(`<button onclick="openReview('${f}')">Review</button>`)
+  b.push(`<button onclick="openDiff('${f}')">Diff</button>`)
   // Follow up on landed work by RESUMING the session that built it — opens an
   // interactive Terminal (claude --resume) with full context, so the human can
   // steer a follow-up live and the next `mux ok` sweeps the edits. Shown only

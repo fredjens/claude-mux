@@ -447,5 +447,81 @@ class SpawnDirectTest(unittest.TestCase):
         self.assertEqual(self.captured, [])
 
 
+class FilePageTest(unittest.TestCase):
+    def setUp(self):
+        self._orig_repo = server.REPO
+        self.tmp = tempfile.mkdtemp()
+        server.REPO = self.tmp
+        with open(os.path.join(self.tmp, "hello.py"), "w") as f:
+            f.write("a = 1\nb = 2\n")
+
+    def tearDown(self):
+        server.REPO = self._orig_repo
+
+    def test_serves_repo_file_with_line_numbers(self):
+        html = server.file_page("hello.py")
+        self.assertIn("<title>hello.py</title>", html)
+        self.assertIn("a = 1", html)
+        self.assertIn("class=fn>1</span>", html)   # line number gutter
+
+    def test_path_traversal_blocked(self):
+        self.assertIn("(file not available)", server.file_page("../../etc/passwd"))
+
+    def test_git_dir_blocked(self):
+        self.assertIn("(file not available)", server.file_page(".git/config"))
+
+    def test_missing_and_empty_path(self):
+        self.assertIn("(not a readable file)", server.file_page("nope.py"))
+        self.assertIn("(file not available)", server.file_page(""))
+
+    def test_back_link_only_with_task(self):
+        self.assertIn("/reviewmap?file=t-slug", server.file_page("hello.py", "t-slug"))
+        self.assertNotIn("Review", server.file_page("hello.py").split("class=title")[0])
+
+
+class ReviewMapPageTest(unittest.TestCase):
+    def setUp(self):
+        self._orig_repo = server.REPO
+        self._orig_mux = server.mux
+        self.tmp = tempfile.mkdtemp()
+        server.REPO = self.tmp
+        os.makedirs(os.path.join(self.tmp, ".mux", "tasks"))
+        with open(os.path.join(self.tmp, ".mux", "tasks", "t.task.md"), "w") as f:
+            f.write("# Task: a feature\n# STATUS: RUNNING\n## Goal\nx\n")
+
+    def tearDown(self):
+        server.REPO = self._orig_repo
+        server.mux = self._orig_mux
+
+    def test_renders_spine_and_context_with_file_links(self):
+        m = {"status": "RUNNING", "summary": "Adds a thing.",
+             "spine": [{"path": "core.py", "role": "core", "note": "the heart"},
+                       {"path": "caller.py", "role": "consequence", "note": "updated call"}],
+             "context": [{"path": "iface.py", "note": "the interface"}],
+             "generated": True}
+        server.mux = lambda *a: (True, json.dumps(m))
+        html = server.reviewmap_page("t.task.md")
+        self.assertIn("Adds a thing.", html)
+        self.assertIn("core.py", html)
+        self.assertIn(">core<", html)            # role badge
+        self.assertIn(">consequence<", html)
+        self.assertIn("Read for context", html)
+        # entries link into /file with the task slug for the back-link
+        self.assertIn("/file?path=core.py&amp;task=t", html)
+        self.assertIn("/file?path=iface.py&amp;task=t", html)
+
+    def test_non_running_task_has_no_map(self):
+        server.mux = lambda *a: (True, json.dumps(
+            {"status": "DRAFT", "summary": "", "spine": [], "context": [], "generated": False}))
+        html = server.reviewmap_page("t.task.md")
+        self.assertIn("no review map", html)
+
+    def test_unparseable_mux_output_is_graceful(self):
+        server.mux = lambda *a: (True, "not json")
+        # falls back to the task file's own STATUS (RUNNING) and an empty map
+        html = server.reviewmap_page("t.task.md")
+        self.assertIn("no changed files", html)
+
+
 if __name__ == "__main__":
     unittest.main()
