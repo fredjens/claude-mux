@@ -586,6 +586,50 @@ STUB
 }
 
 # ==========================================================================
+# 12b. Watchdog: a stalled/degraded API must not hang a tick forever and wedge
+#      the loop. With a tiny MUX_TICK_TIMEOUT, a tick whose claude never returns
+#      is timed out — the child is killed, the lock + pid are cleared (so the
+#      next cycle can run), and the RUNNING task is flagged interrupted.
+# ==========================================================================
+test_tick_watchdog() {
+  header "the watchdog times out a hung tick and frees the loop"
+  command -v ps >/dev/null 2>&1 || { no "ps not available to test the watchdog"; return; }
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-hang.task.md"
+  mk_task "$d" "20200101-000000-hang.task.md" RUNNING
+
+  # Stub claude that blocks forever — simulates an API that never responds.
+  local bin="$d/bin"; mkdir -p "$bin"
+  cat > "$bin/claude" <<'STUB'
+#!/usr/bin/env bash
+i=0; while [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i+1)); done
+STUB
+  chmod +x "$bin/claude"
+
+  # Run ONE tick with a 1s watchdog; it should return on its own (no `mux stop`).
+  ( cd "$d" && MUX_TICK_TIMEOUT=1 PATH="$bin:$PATH" bash "$MUX" tick ) >/dev/null 2>&1 &
+  local tickrun=$!
+  local pid="" i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$d/.mux/run/tick.pid" ]; then pid="$(cat "$d/.mux/run/tick.pid")"; [ -n "$pid" ] && break; fi
+    sleep 0.1; i=$((i+1))
+  done
+  assert "tick recorded its claude pid" test -n "$pid"
+
+  # The watchdog (not us) must end the tick within a few seconds.
+  i=0; while [ "$i" -lt 100 ] && kill -0 "$tickrun" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  assert "the hung tick returned on its own (watchdog fired)" sh -c "! kill -0 $tickrun 2>/dev/null"
+  assert_eq "the watchdog killed the stalled claude" "$(ps -p "$pid" -o pid= 2>/dev/null | tr -d ' ')" ""
+  assert "lock cleared so the loop can run again" test ! -d "$d/.mux/tick.lock"
+  assert "tick.pid cleared after the timeout" test ! -f "$d/.mux/run/tick.pid"
+  assert "the timeout marker was cleaned up" test ! -f "$d/.mux/run/tick.timeout"
+  assert_status "timed-out task stays RUNNING (marker is an annotation)" RUNNING "$f"
+  assert_file_contains "an # Interrupted: line was appended" '^# Interrupted:' "$f"
+
+  wait "$tickrun" 2>/dev/null
+}
+
+# ==========================================================================
 header "mux web / bare mux — branch selection (the session front door)"
 # ==========================================================================
 # MUX_START_DRYRUN=1 makes cmd_web do ONLY branch selection then return, so we
@@ -705,6 +749,7 @@ test_status_json
 test_resolve_id
 test_stop_kills_tick
 test_interrupted_marker
+test_tick_watchdog
 test_start_branch
 test_end_wipes_state
 test_end_push_fail_keeps_state

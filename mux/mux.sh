@@ -779,8 +779,38 @@ cmd_tick() {
     --append-system-prompt "$(cat "$PROMPTS_DIR/OUTPUT.md")" >> "$log" 2>&1 &
   local cpid=$!
   echo "$cpid" > .mux/run/tick.pid
+  # Watchdog: a slow or degraded API must never let a tick hang forever — that
+  # would hold .mux/tick.lock indefinitely and wedge the whole output loop, with
+  # no human around to notice. Time the claude child out after MUX_TICK_TIMEOUT
+  # seconds (default 30m): SIGTERM, then SIGKILL if it lingers (same escalation
+  # as kill_tick). 0/empty/non-numeric disables it. The watchdog ONLY touches
+  # the process and a marker file — never task files — so it can't race the
+  # mark_interrupted/record_session writes the main flow does after `wait`.
+  local timeout="${MUX_TICK_TIMEOUT:-1800}" wpid="" timedout=.mux/run/tick.timeout
+  rm -f "$timedout"
+  if [ "${timeout:-0}" -gt 0 ] 2>/dev/null; then
+    ( sleep "$timeout"
+      ps -p "$cpid" -o command= 2>/dev/null | grep -q 'claude' || exit 0
+      : > "$timedout"        # mark BEFORE killing, so the main flow can react
+      echo "· tick: API stalled — timed out after ${timeout}s, terminating claude" >> "$log"
+      kill "$cpid" 2>/dev/null || true
+      local i=0
+      while ps -p "$cpid" -o command= 2>/dev/null | grep -q 'claude'; do
+        i=$((i+1))
+        [ "$i" -eq 10 ] && kill -9 "$cpid" 2>/dev/null || true   # ~1s grace, then SIGKILL
+        [ "$i" -ge 30 ] && break                                  # give up after ~3s
+        sleep 0.1
+      done
+    ) &
+    wpid=$!
+  fi
   wait "$cpid" 2>/dev/null || true
   rm -f .mux/run/tick.pid
+  # Cancel the watchdog if the tick finished on its own (still sleeping); harmless
+  # if it already fired. Then, if it DID fire, flag the RUNNING task interrupted —
+  # done here (not in the watchdog) so it can't race record_session below.
+  [ -n "$wpid" ] && { kill "$wpid" 2>/dev/null || true; wait "$wpid" 2>/dev/null || true; }
+  [ -f "$timedout" ] && { mark_interrupted; rm -f "$timedout"; }
   # Pin the session id this tick used onto its RUNNING task (last one wins) so a
   # stuck task can be resumed interactively. Do this BEFORE dropping the lock.
   record_session "$(grep -o '"session_id":"[0-9a-f-]\{36\}"' "$log" 2>/dev/null | tail -n1 | sed 's/.*"session_id":"\(.*\)"/\1/')"
