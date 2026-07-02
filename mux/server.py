@@ -310,18 +310,18 @@ def result_summary(ev):
 # cycle_divider indexes with a stride coprime to 12 so the banner walks the
 # whole list deterministically without real randomness.
 _CYCLE_PHRASES = [
-    "switching channels…",
-    "routing the next signal…",
-    "the bus is hot…",
-    "multiplexing resumes…",
-    "patching in a fresh channel…",
-    "the switch flips through…",
-    "fanning out the queue…",
-    "signal on the wire…",
-    "the executor wakes…",
-    "tapping the stream…",
-    "throughput climbing…",
-    "channels live…",
+    "switching channels",
+    "routing the next signal",
+    "the bus is hot",
+    "multiplexing resumes",
+    "patching in a fresh channel",
+    "the switch flips through",
+    "fanning out the queue",
+    "signal on the wire",
+    "the executor wakes",
+    "tapping the stream",
+    "throughput climbing",
+    "channels live",
 ]
 
 
