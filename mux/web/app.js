@@ -44,13 +44,11 @@ document.addEventListener("keydown",e=>{if(!document.body.classList.contains("dr
 // counter is driven client-side from a start time so it ticks every second
 // without hammering the server. work.start=null means no cycle in flight.
 let work={start:null,known:false}
-let ticking=false  // true while a live tick holds .mux/tick.lock (from /api/status)
 function drawWork(){const w=E("working");if(!w)return
  if(work.start===null){w.innerHTML="";return}
  const secs=work.known?Math.max(0,Math.floor((Date.now()-work.start)/1000)):null
  w.innerHTML='<span class=glyph>✳</span><span class=shimmer>Working…'+(secs===null?"":" "+secs+"s")+'</span>'}
 async function pollStatus(){try{const s=await (await fetch("/api/status")).json()
-  ticking=!!s.executing
   if(!s.executing){work.start=null;work.known=false}
   else{const base=Date.now()-(s.elapsed||0)*1000
    // Re-sync start only on a new cycle or first sight, so the local counter
@@ -226,9 +224,7 @@ function buttons(t){const b=[],f=t.file
   b.push(`<button class=danger onclick="if(confirm('Delete this draft task?'))act('delete','${f}')">delete</button>`)}
  // A READY task hasn't been claimed yet, so you can still regret it: pull it
  // back to DRAFT (un-release) to edit it before the output runs it.
- // …but not the task a live tick is about to claim (t.next during a tick):
- // the CLI now refuses that, so don't offer it.
- if(t.status=="READY"&&!auto&&!(t.next&&ticking))b.push(`<button onclick="act('unrelease','${f}')">← unrelease</button>`)
+ if(t.status=="READY"&&!auto)b.push(`<button onclick="act('unrelease','${f}')">← unrelease</button>`)
  if(t.status=="RUNNING"){
   if(t.executing)return ""
   if(!auto)b.push(`<button class=ok onclick="act('ok')">Approve</button>`)

@@ -35,7 +35,12 @@ setup_repo() {
     git config user.email "test@example.com"
     git config user.name "Test"
     echo init > README.md
-    git add README.md
+    # Test doubles (a fake/stub `claude`) live under bin/ inside the repo; they
+    # are scaffolding, not work product, so ignore them — otherwise they'd make
+    # the tree "dirty" and cmd_next (which pre-claim relies on) would decline to
+    # select any task, mirroring the "work awaiting approval" idle case.
+    echo 'bin/' > .gitignore
+    git add README.md .gitignore
     git commit -qm init
   )
   printf '%s\n' "$d"
@@ -155,36 +160,6 @@ test_unrelease() {
   # Guarded to READY: unrelease on a DRAFT is refused.
   m "$d" unrelease reg
   assert_nonzero "unrelease on a non-READY task is refused"
-}
-
-# ==========================================================================
-# 2a'. A live tick (holds .mux/tick.lock) has selected the FIFO-first READY
-#      task but not yet run `mux claim` — that one task can't be unreleased
-#      out from under it; other READY tasks (and any task with no live tick)
-#      still can.
-# ==========================================================================
-test_unrelease_guards_claiming_task() {
-  header "unrelease refuses the task a live tick is claiming"
-  local d; d="$(setup_repo)"
-  # Two READY tasks; FIFO by filename → first is the one cmd_next selects.
-  mk_task "$d" "20200101-000000-first.task.md" READY
-  mk_task "$d" "20200101-000001-second.task.md" READY
-  local f1="$d/.mux/tasks/20200101-000000-first.task.md"
-  local f2="$d/.mux/tasks/20200101-000001-second.task.md"
-  mkdir -p "$d/.mux/tick.lock"    # a live tick holds the lock
-  # The at-risk task (cmd_next's pick) is refused and stays READY.
-  m "$d" unrelease 20200101-000000-first
-  assert_nonzero "unrelease of the claiming task is refused"
-  assert_status "claiming task stays READY" READY "$f1"
-  # A different READY task, deeper in the queue, is still unreleasable.
-  m "$d" unrelease 20200101-000001-second
-  assert_zero "unrelease of a non-next READY task still succeeds"
-  assert_status "non-next task went READY -> DRAFT" DRAFT "$f2"
-  # With NO live tick, the first task unreleases as before (regression guard).
-  rm -rf "$d/.mux/tick.lock"
-  m "$d" unrelease 20200101-000000-first
-  assert_zero "unrelease succeeds when no tick is live"
-  assert_status "first task went READY -> DRAFT" DRAFT "$f1"
 }
 
 # ==========================================================================
@@ -530,6 +505,9 @@ test_stop_kills_tick() {
   header "stop kills the in-flight tick, clearing the lock only after"
   command -v ps >/dev/null 2>&1 || { no "ps not available to test tick teardown"; return; }
   local d; d="$(setup_repo)"
+  # A RUNNING task gives the pre-claiming tick something to select and resume;
+  # without a runnable task cmd_next is empty and the tick skips claude.
+  mk_task "$d" "20200101-000000-stopme.task.md" RUNNING
   # Stub `claude` (named so its command line matches kill_tick's `claude` check);
   # it stays alive in short sleeps so a kill lands within ~0.1s, no orphan.
   local bin="$d/bin"; mkdir -p "$bin"
@@ -578,12 +556,15 @@ test_interrupted_marker() {
   local d; d="$(setup_repo)"
   local f="$d/.mux/tasks/20200101-000000-irq.task.md"
   mk_task "$d" "20200101-000000-irq.task.md" RUNNING
-  echo "half-finished edit" > "$d/partial.txt"   # PARTIAL work in the tree
 
-  # Stub claude that blocks so the tick holds the lock until we stop it.
+  # Stub claude that first drops a PARTIAL edit in the tree (as real claude would
+  # mid-cycle), then blocks so the tick holds the lock until we stop it. The edit
+  # appears AFTER launch — at tick start the tree is clean so cmd_next selects the
+  # task (the pre-claim path); the dirtiness is then what makes it interrupted.
   local bin="$d/bin"; mkdir -p "$bin"
   cat > "$bin/claude" <<'STUB'
 #!/usr/bin/env bash
+echo "half-finished edit" > partial.txt
 i=0; while [ "$i" -lt 600 ]; do sleep 0.1; i=$((i+1)); done
 STUB
   chmod +x "$bin/claude"
@@ -762,6 +743,58 @@ test_tick_normal_cleanup() {
   assert "a normal tick did NOT flag the task interrupted" sh -c "! grep -q '^# Interrupted:' '$f'"
 }
 
+# (g) The tick WRAPPER claims the selected task before launching claude: a READY
+#     task ends RUNNING even when the stub claude does nothing (never claims).
+test_tick_wrapper_claims_ready() {
+  header "the tick wrapper claims a READY task before launching claude"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-ready.task.md"
+  mk_task "$d" "20200101-000000-ready.task.md" READY
+  local fake="$d/bin/fakeclaude"
+  # A claude that does NOTHING — it never runs `mux claim`.
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'exit 0'
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "tick over a READY task exits 0"
+  assert_status "the wrapper claimed READY -> RUNNING" RUNNING "$f"
+  assert "lock cleaned up after the tick" test ! -d "$d/.mux/tick.lock"
+}
+
+# (h) A task already RUNNING is NOT re-claimed by the wrapper (that would error):
+#     the tick resumes it without failure and it stays RUNNING.
+test_tick_wrapper_no_double_claim() {
+  header "the tick wrapper does not re-claim an already-RUNNING task"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-running.task.md"
+  mk_task "$d" "20200101-000000-running.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'exit 0'
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "tick over a RUNNING task exits 0 (no double-claim)"
+  case "$OUT" in *refused*) no "no double-claim error surfaced (got: $OUT)";; *) ok "no double-claim error surfaced";; esac
+  assert_status "the task stays RUNNING" RUNNING "$f"
+  assert "lock cleaned up after the tick" test ! -d "$d/.mux/tick.lock"
+}
+
+# (i) With NO runnable task (cmd_next empty), the wrapper never launches claude
+#     and exits cleanly with the lock released.
+test_tick_no_work_skips_claude() {
+  header "an idle tick (no runnable task) skips claude and releases the lock"
+  local d; d="$(setup_repo)"
+  # A single DRAFT — not runnable outside auto mode, so cmd_next is empty.
+  mk_task "$d" "20200101-000000-draft.task.md" DRAFT
+  local fake="$d/bin/fakeclaude"
+  # If this ever runs it drops a sentinel we assert is absent.
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'echo ran > "$PWD/ran.txt"'
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "an idle tick exits 0"
+  assert "claude was NOT launched (no work)" test ! -f "$d/ran.txt"
+  assert "lock released after an idle tick" test ! -d "$d/.mux/tick.lock"
+  assert "tick.pid not written on an idle tick" test ! -f "$d/.mux/run/tick.pid"
+}
+
 # ==========================================================================
 header "mux web / bare mux — branch selection (the session front door)"
 # ==========================================================================
@@ -865,7 +898,6 @@ test_add
 test_task_channel
 test_happy_path
 test_unrelease
-test_unrelease_guards_claiming_task
 test_auto_runs_drafts
 test_illegal_transitions
 test_claim_clean_check
@@ -889,6 +921,9 @@ test_tick_progress_not_killed
 test_tick_reclaims_stale_lock
 test_tick_live_lock_skips
 test_tick_normal_cleanup
+test_tick_wrapper_claims_ready
+test_tick_wrapper_no_double_claim
+test_tick_no_work_skips_claude
 test_start_branch
 test_end_wipes_state
 test_end_push_fail_keeps_state

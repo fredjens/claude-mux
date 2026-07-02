@@ -313,12 +313,6 @@ cmd_unrelease() {
   [ $# -ge 1 ] || die "usage: mux unrelease <id>"
   local f; f="$(resolve_id "$1")"
   require_status "$f" READY
-  # A live tick that has selected this task but not yet run `mux claim` leaves it
-  # READY on disk — unreleasing it now would collide with the in-flight tick.
-  # Refuse only that one task (the one cmd_next selects), not every READY task.
-  if [ -d .mux/tick.lock ] && [ "$(cmd_next)" = "${f##*/}" ]; then
-    die "${f##*/} is being claimed by a live tick — cannot unrelease; revert/wait for it instead"
-  fi
   set_status "$f" DRAFT
   echo "← ${f##*/}  READY → DRAFT"
 }
@@ -764,7 +758,7 @@ output_cycle() {
   cat <<'CYCLE'
 You are a headless worker with NO in-session memory between runs (each cycle is a fresh process), but `.mux/NOTES.md` carries durable execution notes forward across cycles — read it at the start and append to it at the end (see the OUTPUT prompt). Run `mux next` (bash): it prints the ONE task file to work on, or nothing.
 - If it prints nothing, do NOTHING and stop.
-- Otherwise, if that task is not already RUNNING, claim it with `mux claim <task>`. Then COMPLETE THE ENTIRE TASK in THIS session: do everything its Goal and Details require and run the tests it names. Do NOT stop early or leave it half-done — there is no shared memory between runs, so if you stop, the next run starts over from scratch and makes no progress. Keep working until the task is fully done.
+- Otherwise, that task has already been claimed FOR you (the tick claimed it before launching this session, so it is already RUNNING) — do NOT claim it yourself. COMPLETE THE ENTIRE TASK in THIS session: do everything its Goal and Details require and run the tests it names. Do NOT stop early or leave it half-done — there is no shared memory between runs, so if you stop, the next run starts over from scratch and makes no progress. Keep working until the task is fully done.
 - NEVER run git and NEVER commit — mux handles that. When the work is fully complete, STOP and leave the task RUNNING; the human reviews your changes and runs `mux ok` to commit them (or discards them).
 - You are headless — there is no one to ask. ONLY if you genuinely cannot proceed without a human decision, run `mux block <task> "<your question>"` and stop.
 - If the task is truly unworkable, run `mux fail <task> "<one-line reason>"` and stop.
@@ -794,6 +788,22 @@ cmd_tick() {
     mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
   fi
   echo "$$" > .mux/tick.lock/pid    # stamp the owner so a later tick can reclaim
+  # Pre-claim the task for THIS tick before launching claude, so the moment the
+  # tick commits to a task it is RUNNING on disk — there is no window where the
+  # task the tick is working on is still READY/DRAFT for a racing unrelease.
+  # cmd_next is the authoritative selector (RUNNING wins, else FIFO-first
+  # runnable READY/auto-DRAFT; nothing while the tree is dirty). An EMPTY result
+  # means no work this cycle: drop the lock and skip claude entirely, so an idle
+  # cycle no longer spends an API call. Only claim when the task isn't already
+  # RUNNING — a resumed RUNNING task (awaiting approval / interrupted) must not
+  # be re-claimed (cmd_claim refuses non-READY/DRAFT). In auto mode cmd_next may
+  # return a DRAFT, which cmd_claim already handles (DRAFT → RUNNING in place).
+  local f; f="$(cmd_next)"
+  if [ -z "$f" ]; then
+    rm -rf .mux/tick.lock 2>/dev/null || true
+    return 0
+  fi
+  [ "$(task_status "$TASKS/$f")" != RUNNING ] && cmd_claim "$f"
   local log="$LOG"                       # ONE rolling log — never blanks between tasks
   # Injectable for tests: MUX_CLAUDE lets the suite substitute a fake `claude`
   # (e.g. a script that sleeps) without hitting the real API. Unset → real claude.
