@@ -772,15 +772,33 @@ to_seconds() { case "$1" in *h) echo $(( ${1%h} * 3600 ));; *m) echo $(( ${1%m} 
 # streamed live to a per-tick log the UI can tail. Subscription, not API key.
 cmd_tick() {
   mkdir -p .mux/log .mux/run
-  mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
+  # Acquire the tick lock, self-healing an ORPHANED one: the lock dir records the
+  # pid of the mux process that owns it (.mux/tick.lock/pid). If the lock already
+  # exists we skip ONLY when its owner is still alive — a genuinely in-flight
+  # tick. If the owner is gone (the tick's process died without cleaning up, e.g.
+  # SIGKILL), the lock is stale and would wedge the loop forever, so we reclaim
+  # it instead of skipping.
+  if ! mkdir .mux/tick.lock 2>/dev/null; then
+    local owner; owner="$(cat .mux/tick.lock/pid 2>/dev/null || true)"
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      echo "· tick: one already running, skipped"; return 0
+    fi
+    echo "· tick: reclaiming stale lock (owner ${owner:-unknown} gone)"
+    rm -rf .mux/tick.lock
+    mkdir .mux/tick.lock 2>/dev/null || { echo "· tick: one already running, skipped"; return 0; }
+  fi
+  echo "$$" > .mux/tick.lock/pid    # stamp the owner so a later tick can reclaim
   local log="$LOG"                       # ONE rolling log — never blanks between tasks
+  # Injectable for tests: MUX_CLAUDE lets the suite substitute a fake `claude`
+  # (e.g. a script that sleeps) without hitting the real API. Unset → real claude.
+  local claude_bin="${MUX_CLAUDE:-claude}"
   # Run claude in the BACKGROUND and record its pid (.mux/run/tick.pid) so a
   # stopper (kill_tick) can find and halt THIS tick's claude — otherwise the
   # grandchild outlives a `kill` of the loop and keeps editing the tree. We then
   # `wait` for that exact child and capture ITS status (the backgrounded
   # command's, not the script's $?), swallowing it: a killed claude must never
   # abort the loop (the old `|| true` semantics, preserved).
-  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude -p "$(output_cycle)" \
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN "$claude_bin" -p "$(output_cycle)" \
     --dangerously-skip-permissions \
     --verbose --output-format stream-json \
     --append-system-prompt "$(cat "$PROMPTS_DIR/OUTPUT.md")" >> "$log" 2>&1 &
@@ -788,21 +806,45 @@ cmd_tick() {
   echo "$cpid" > .mux/run/tick.pid
   # Watchdog: a slow or degraded API must never let a tick hang forever — that
   # would hold .mux/tick.lock indefinitely and wedge the whole output loop, with
-  # no human around to notice. Time the claude child out after MUX_TICK_TIMEOUT
-  # seconds (default 30m): SIGTERM, then SIGKILL if it lingers (same escalation
-  # as kill_tick). 0/empty/non-numeric disables it. The watchdog ONLY touches
-  # the process and a marker file — never task files — so it can't race the
-  # mark_interrupted/record_session writes the main flow does after `wait`.
-  local timeout="${MUX_TICK_TIMEOUT:-1800}" wpid="" timedout=.mux/run/tick.timeout
+  # no human around to notice. Two triggers, checked from one poll loop:
+  #   - STALL (primary, fast recovery): a healthy tick streams to $LOG via
+  #     --output-format stream-json, so a tick that writes NOTHING for
+  #     MUX_TICK_STALL seconds (default 180) is hung on its API call — kill it.
+  #     Progress is the BYTE size of $LOG (partial writes still count), so any
+  #     growth resets the stall counter.
+  #   - CEILING (backstop): kill after MUX_TICK_TIMEOUT seconds (default 1200)
+  #     regardless of output — a tick that dribbles forever still gets cut.
+  # Either 0/empty/non-numeric disables that trigger; both off → no watchdog.
+  # On fire it SIGTERMs then SIGKILLs the child (same escalation as kill_tick).
+  # The watchdog ONLY touches the process and a marker file — never task files —
+  # so it can't race the mark_interrupted/record_session writes the main flow
+  # does after `wait`.
+  local stall timeout wpid="" timedout=.mux/run/tick.timeout
+  stall="${MUX_TICK_STALL:-180}";   [ "$stall"   -gt 0 ] 2>/dev/null || stall=0
+  timeout="${MUX_TICK_TIMEOUT:-1200}"; [ "$timeout" -gt 0 ] 2>/dev/null || timeout=0
   rm -f "$timedout"
-  if [ "${timeout:-0}" -gt 0 ] 2>/dev/null; then
-    ( sleep "$timeout"
-      ps -p "$cpid" -o command= 2>/dev/null | grep -q 'claude' || exit 0
+  if [ "$stall" -gt 0 ] || [ "$timeout" -gt 0 ]; then
+    ( # poll granularity: ~10s, but never coarser than a (small, test) threshold
+      poll=10
+      [ "$stall"   -gt 0 ] && [ "$stall"   -lt "$poll" ] && poll="$stall"
+      [ "$timeout" -gt 0 ] && [ "$timeout" -lt "$poll" ] && poll="$timeout"
+      [ "$poll" -lt 1 ] && poll=1
+      last=-1; nogrow=0; elapsed=0; reason=""
+      while kill -0 "$cpid" 2>/dev/null; do
+        sleep "$poll"
+        kill -0 "$cpid" 2>/dev/null || break
+        elapsed=$((elapsed + poll))
+        sz="$(wc -c < "$log" 2>/dev/null | tr -d ' ')"; sz="${sz:-0}"
+        if [ "$sz" -gt "$last" ]; then last="$sz"; nogrow=0; else nogrow=$((nogrow + poll)); fi
+        [ "$stall"   -gt 0 ] && [ "$nogrow"  -ge "$stall"   ] && { reason="stalled — no output for ${stall}s"; break; }
+        [ "$timeout" -gt 0 ] && [ "$elapsed" -ge "$timeout" ] && { reason="timed out after ${timeout}s"; break; }
+      done
+      kill -0 "$cpid" 2>/dev/null || exit 0     # claude already exited — nothing to do
       : > "$timedout"        # mark BEFORE killing, so the main flow can react
-      echo "· tick: API stalled — timed out after ${timeout}s, terminating claude" >> "$log"
+      echo "· tick: API $reason, terminating claude" >> "$log"
       kill "$cpid" 2>/dev/null || true
-      local i=0
-      while ps -p "$cpid" -o command= 2>/dev/null | grep -q 'claude'; do
+      i=0
+      while kill -0 "$cpid" 2>/dev/null; do
         i=$((i+1))
         [ "$i" -eq 10 ] && kill -9 "$cpid" 2>/dev/null || true   # ~1s grace, then SIGKILL
         [ "$i" -ge 30 ] && break                                  # give up after ~3s
@@ -821,7 +863,7 @@ cmd_tick() {
   # Pin the session id this tick used onto its RUNNING task (last one wins) so a
   # stuck task can be resumed interactively. Do this BEFORE dropping the lock.
   record_session "$(grep -o '"session_id":"[0-9a-f-]\{36\}"' "$log" 2>/dev/null | tail -n1 | sed 's/.*"session_id":"\(.*\)"/\1/')"
-  rmdir .mux/tick.lock 2>/dev/null || true
+  rm -rf .mux/tick.lock 2>/dev/null || true    # lock dir holds a pid file → rm -rf, not rmdir
   [ "$(wc -l < "$log" 2>/dev/null || echo 0)" -gt 4000 ] && { tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; } || true
 }
 
@@ -829,7 +871,7 @@ cmd_tick() {
 # No session, nothing to reprompt. Usually started for you by `mux web`.
 cmd_output() {
   local human="${1:-10s}" secs; secs="$(to_seconds "$human")"
-  rmdir .mux/tick.lock 2>/dev/null || true     # clear a stale lock from a killed tick
+  rm -rf .mux/tick.lock 2>/dev/null || true    # clear a stale lock from a killed tick
   echo "▶ output — headless; polls for work every ${human}, runs a cycle only when there is some."
   while :; do
     [ -n "$(cmd_next)" ] && cmd_tick
@@ -860,7 +902,7 @@ kill_tick() {
   fi
   # Only now that the tick's claude is gone do we drop its pid + the lock.
   rm -f .mux/run/tick.pid
-  rmdir .mux/tick.lock 2>/dev/null || true
+  rm -rf .mux/tick.lock 2>/dev/null || true    # lock dir holds a pid file → rm -rf, not rmdir
 }
 
 # Stop the output loop + web server recorded for THIS repo (only ours — we

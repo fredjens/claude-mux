@@ -587,27 +587,31 @@ STUB
 
 # ==========================================================================
 # 12b. Watchdog: a stalled/degraded API must not hang a tick forever and wedge
-#      the loop. With a tiny MUX_TICK_TIMEOUT, a tick whose claude never returns
-#      is timed out — the child is killed, the lock + pid are cleared (so the
-#      next cycle can run), and the RUNNING task is flagged interrupted.
+#      the loop. A fake `claude` (injected via MUX_CLAUDE) lets us simulate the
+#      exact failure modes without the real API. Small MUX_TICK_STALL/TIMEOUT
+#      keep these fast. Covers: (a) stall detector, (b) ceiling, (c) progress is
+#      not killed prematurely, (d) stale lock reclaimed, (e) live lock skipped,
+#      (f) a normal fast tick cleans up. Fakes write to STDOUT, which cmd_tick
+#      redirects to $LOG — the byte-growth signal the watchdog watches.
 # ==========================================================================
-test_tick_watchdog() {
-  header "the watchdog times out a hung tick and frees the loop"
+
+# Write an executable fake claude at <path> from the given body; returns the path.
+mk_fake_claude() { local p="$1"; shift; mkdir -p "$(dirname "$p")"; printf '%s\n' "$@" > "$p"; chmod +x "$p"; }
+
+# (a) A fake that writes once then goes silent is killed by the STALL detector.
+test_tick_stall_detector() {
+  header "the STALL detector kills a tick that stops producing output"
   command -v ps >/dev/null 2>&1 || { no "ps not available to test the watchdog"; return; }
   local d; d="$(setup_repo)"
-  local f="$d/.mux/tasks/20200101-000000-hang.task.md"
-  mk_task "$d" "20200101-000000-hang.task.md" RUNNING
+  local f="$d/.mux/tasks/20200101-000000-stall.task.md"
+  mk_task "$d" "20200101-000000-stall.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' \
+    'echo "streaming some output"' \
+    'i=0; while [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i+1)); done'
 
-  # Stub claude that blocks forever — simulates an API that never responds.
-  local bin="$d/bin"; mkdir -p "$bin"
-  cat > "$bin/claude" <<'STUB'
-#!/usr/bin/env bash
-i=0; while [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i+1)); done
-STUB
-  chmod +x "$bin/claude"
-
-  # Run ONE tick with a 1s watchdog; it should return on its own (no `mux stop`).
-  ( cd "$d" && MUX_TICK_TIMEOUT=1 PATH="$bin:$PATH" bash "$MUX" tick ) >/dev/null 2>&1 &
+  # Stall in 2s, ceiling disabled → only the stall trigger can fire.
+  ( cd "$d" && MUX_CLAUDE="$fake" MUX_TICK_STALL=2 MUX_TICK_TIMEOUT=0 bash "$MUX" tick ) >/dev/null 2>&1 &
   local tickrun=$!
   local pid="" i=0
   while [ "$i" -lt 50 ]; do
@@ -615,18 +619,117 @@ STUB
     sleep 0.1; i=$((i+1))
   done
   assert "tick recorded its claude pid" test -n "$pid"
-
-  # The watchdog (not us) must end the tick within a few seconds.
-  i=0; while [ "$i" -lt 100 ] && kill -0 "$tickrun" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
-  assert "the hung tick returned on its own (watchdog fired)" sh -c "! kill -0 $tickrun 2>/dev/null"
-  assert_eq "the watchdog killed the stalled claude" "$(ps -p "$pid" -o pid= 2>/dev/null | tr -d ' ')" ""
-  assert "lock cleared so the loop can run again" test ! -d "$d/.mux/tick.lock"
-  assert "tick.pid cleared after the timeout" test ! -f "$d/.mux/run/tick.pid"
-  assert "the timeout marker was cleaned up" test ! -f "$d/.mux/run/tick.timeout"
-  assert_status "timed-out task stays RUNNING (marker is an annotation)" RUNNING "$f"
-  assert_file_contains "an # Interrupted: line was appended" '^# Interrupted:' "$f"
-
+  i=0; while [ "$i" -lt 150 ] && kill -0 "$tickrun" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  assert "the stalled tick returned on its own (stall detector fired)" sh -c "! kill -0 $tickrun 2>/dev/null"
+  assert_eq "the stall detector killed claude" "$(ps -p "$pid" -o pid= 2>/dev/null | tr -d ' ')" ""
+  assert "lock cleared after the stall kill" test ! -d "$d/.mux/tick.lock"
+  assert "tick.pid cleared after the stall kill" test ! -f "$d/.mux/run/tick.pid"
+  assert_file_contains "the killed task was flagged interrupted" '^# Interrupted:' "$f"
   wait "$tickrun" 2>/dev/null
+}
+
+# (b) A fake that never writes is killed by the CEILING (stall disabled).
+test_tick_ceiling() {
+  header "the CEILING kills a tick that never returns even with no stall"
+  command -v ps >/dev/null 2>&1 || { no "ps not available to test the watchdog"; return; }
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-ceil.task.md"
+  mk_task "$d" "20200101-000000-ceil.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' \
+    'i=0; while [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i+1)); done'
+
+  # Ceiling at 2s, stall disabled → only the ceiling can fire.
+  ( cd "$d" && MUX_CLAUDE="$fake" MUX_TICK_STALL=0 MUX_TICK_TIMEOUT=2 bash "$MUX" tick ) >/dev/null 2>&1 &
+  local tickrun=$!
+  local pid="" i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$d/.mux/run/tick.pid" ]; then pid="$(cat "$d/.mux/run/tick.pid")"; [ -n "$pid" ] && break; fi
+    sleep 0.1; i=$((i+1))
+  done
+  assert "tick recorded its claude pid" test -n "$pid"
+  i=0; while [ "$i" -lt 150 ] && kill -0 "$tickrun" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  assert "the hung tick returned on its own (ceiling fired)" sh -c "! kill -0 $tickrun 2>/dev/null"
+  assert_eq "the ceiling killed claude" "$(ps -p "$pid" -o pid= 2>/dev/null | tr -d ' ')" ""
+  assert "lock cleared so the loop can run again" test ! -d "$d/.mux/tick.lock"
+  assert "the timeout marker was cleaned up" test ! -f "$d/.mux/run/tick.timeout"
+  assert_file_contains "the timed-out task was flagged interrupted" '^# Interrupted:' "$f"
+  wait "$tickrun" 2>/dev/null
+}
+
+# (c) A fake that keeps writing within the stall window runs to completion — it
+#     is NOT killed prematurely (each write resets the stall counter).
+test_tick_progress_not_killed() {
+  header "a tick that keeps producing output is NOT killed prematurely"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-live.task.md"
+  mk_task "$d" "20200101-000000-live.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' \
+    'i=0; while [ "$i" -lt 5 ]; do echo "chunk $i"; sleep 1; i=$((i+1)); done'
+
+  # Stall window (4s) comfortably exceeds the 1s write cadence; ceiling off.
+  ( cd "$d" && MUX_CLAUDE="$fake" MUX_TICK_STALL=4 MUX_TICK_TIMEOUT=0 bash "$MUX" tick ) >/dev/null 2>&1 &
+  local tickrun=$!
+  local i=0; while [ "$i" -lt 200 ] && kill -0 "$tickrun" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  assert "the healthy tick finished on its own" sh -c "! kill -0 $tickrun 2>/dev/null"
+  assert "no timeout marker was left (not killed)" test ! -f "$d/.mux/run/tick.timeout"
+  assert "the progressing task was NOT flagged interrupted" sh -c "! grep -q '^# Interrupted:' '$f'"
+  assert "lock cleaned up after a normal completion" test ! -d "$d/.mux/tick.lock"
+  wait "$tickrun" 2>/dev/null
+}
+
+# (d) A STALE lock (dir with a dead owner pid) is reclaimed by the next tick.
+test_tick_reclaims_stale_lock() {
+  header "a stale lock (dead owner) is reclaimed, not skipped"
+  local d; d="$(setup_repo)"
+  mk_task "$d" "20200101-000000-reclaim.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'echo done'
+
+  # Pre-seed an orphaned lock owned by a pid that is not alive.
+  mkdir -p "$d/.mux/tick.lock"; echo 999999 > "$d/.mux/tick.lock/pid"
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "tick over a stale lock exits 0"
+  assert_contains "the stale lock was reclaimed" "$OUT" "reclaiming stale lock"
+  assert "the lock is cleaned up after the reclaimed tick ran" test ! -d "$d/.mux/tick.lock"
+}
+
+# (e) A LIVE lock (owner still alive) still causes a tick to skip untouched.
+test_tick_live_lock_skips() {
+  header "a live lock (owner alive) makes a tick skip"
+  local d; d="$(setup_repo)"
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'echo should-not-run > "$PWD/ran.txt"'
+
+  # A live owner: a real background process whose pid we stamp into the lock.
+  sleep 30 & local owner=$!
+  mkdir -p "$d/.mux/tick.lock"; echo "$owner" > "$d/.mux/tick.lock/pid"
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "tick over a live lock exits 0"
+  assert_contains "it reports the live tick and skips" "$OUT" "one already running"
+  assert "the live lock is left untouched" test -d "$d/.mux/tick.lock"
+  assert "claude did NOT run while another tick holds the lock" test ! -f "$d/ran.txt"
+  kill "$owner" 2>/dev/null; wait "$owner" 2>/dev/null
+}
+
+# (f) A normal fast tick completes and cleans up the lock + tick.pid.
+test_tick_normal_cleanup() {
+  header "a normal fast tick completes and cleans up"
+  local d; d="$(setup_repo)"
+  local f="$d/.mux/tasks/20200101-000000-fast.task.md"
+  mk_task "$d" "20200101-000000-fast.task.md" RUNNING
+  local fake="$d/bin/fakeclaude"
+  mk_fake_claude "$fake" '#!/usr/bin/env bash' 'echo {\"session_id\":\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"}'
+
+  OUT="$( cd "$d" && MUX_CLAUDE="$fake" bash "$MUX" tick 2>&1 )"; RC=$?
+  assert_zero "a normal tick exits 0"
+  assert "lock cleaned up after a normal tick" test ! -d "$d/.mux/tick.lock"
+  assert "tick.pid cleaned up after a normal tick" test ! -f "$d/.mux/run/tick.pid"
+  assert "no timeout marker after a normal tick" test ! -f "$d/.mux/run/tick.timeout"
+  assert "a normal tick did NOT flag the task interrupted" sh -c "! grep -q '^# Interrupted:' '$f'"
 }
 
 # ==========================================================================
@@ -749,7 +852,12 @@ test_status_json
 test_resolve_id
 test_stop_kills_tick
 test_interrupted_marker
-test_tick_watchdog
+test_tick_stall_detector
+test_tick_ceiling
+test_tick_progress_not_killed
+test_tick_reclaims_stale_lock
+test_tick_live_lock_skips
+test_tick_normal_cleanup
 test_start_branch
 test_end_wipes_state
 test_end_push_fail_keeps_state
