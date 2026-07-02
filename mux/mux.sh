@@ -313,6 +313,12 @@ cmd_unrelease() {
   [ $# -ge 1 ] || die "usage: mux unrelease <id>"
   local f; f="$(resolve_id "$1")"
   require_status "$f" READY
+  # A live tick that has selected this task but not yet run `mux claim` leaves it
+  # READY on disk — unreleasing it now would collide with the in-flight tick.
+  # Refuse only that one task (the one cmd_next selects), not every READY task.
+  if [ -d .mux/tick.lock ] && [ "$(cmd_next)" = "${f##*/}" ]; then
+    die "${f##*/} is being claimed by a live tick — cannot unrelease; revert/wait for it instead"
+  fi
   set_status "$f" DRAFT
   echo "← ${f##*/}  READY → DRAFT"
 }

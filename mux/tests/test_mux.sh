@@ -158,6 +158,36 @@ test_unrelease() {
 }
 
 # ==========================================================================
+# 2a'. A live tick (holds .mux/tick.lock) has selected the FIFO-first READY
+#      task but not yet run `mux claim` — that one task can't be unreleased
+#      out from under it; other READY tasks (and any task with no live tick)
+#      still can.
+# ==========================================================================
+test_unrelease_guards_claiming_task() {
+  header "unrelease refuses the task a live tick is claiming"
+  local d; d="$(setup_repo)"
+  # Two READY tasks; FIFO by filename → first is the one cmd_next selects.
+  mk_task "$d" "20200101-000000-first.task.md" READY
+  mk_task "$d" "20200101-000001-second.task.md" READY
+  local f1="$d/.mux/tasks/20200101-000000-first.task.md"
+  local f2="$d/.mux/tasks/20200101-000001-second.task.md"
+  mkdir -p "$d/.mux/tick.lock"    # a live tick holds the lock
+  # The at-risk task (cmd_next's pick) is refused and stays READY.
+  m "$d" unrelease 20200101-000000-first
+  assert_nonzero "unrelease of the claiming task is refused"
+  assert_status "claiming task stays READY" READY "$f1"
+  # A different READY task, deeper in the queue, is still unreleasable.
+  m "$d" unrelease 20200101-000001-second
+  assert_zero "unrelease of a non-next READY task still succeeds"
+  assert_status "non-next task went READY -> DRAFT" DRAFT "$f2"
+  # With NO live tick, the first task unreleases as before (regression guard).
+  rm -rf "$d/.mux/tick.lock"
+  m "$d" unrelease 20200101-000000-first
+  assert_zero "unrelease succeeds when no tick is live"
+  assert_status "first task went READY -> DRAFT" DRAFT "$f1"
+}
+
+# ==========================================================================
 # 2b. Auto mode (the .mux/auto flag) makes the executor run DRAFTs IN PLACE:
 #     `next` selects a DRAFT and `claim` flips it DRAFT->RUNNING, all WITHOUT a
 #     DRAFT->READY rewrite — so toggling auto off leaves un-run tasks DRAFT.
@@ -835,6 +865,7 @@ test_add
 test_task_channel
 test_happy_path
 test_unrelease
+test_unrelease_guards_claiming_task
 test_auto_runs_drafts
 test_illegal_transitions
 test_claim_clean_check
